@@ -1,20 +1,17 @@
-import argparse
-import sys
-import os
-import json
-import time
+import argparse, sys, os, json, time, glob
 from datetime import datetime
 
-import ffmpeg
+import ffmpeg, streamlink, subprocess, threading
+from scipy.io.wavfile import write as wavwrite
+
 import numpy as np
-import constants as const
+import config
+
 import whisper
 from whisper.audio import SAMPLE_RATE
+from silero import VAD
 
 def open_stream(stream, preferred_quality):
-    import streamlink
-    import subprocess
-    import threading
     stream_options = streamlink.streams(stream)
     if not stream_options:
         print("No playable streams found on this URL:", stream)
@@ -55,9 +52,9 @@ def open_stream(stream, preferred_quality):
 
 def process_stream(url, process1, process2, n_bytes, model, language, vad, task_list, **decode_options):
     chunk_size_ms = 250
-    max_silent_ms = 500 # Duration of silence before forcing a transcription
-    min_speech_ms = 2000 # Minimum duration of speech before checking for max silence
-    prepend_ms = chunk_size_ms * 2 # Duration of silence to prepend to the next transcription
+    max_silent_ms = 1000 # Duration of silence before forcing a transcription
+    min_speech_ms = 1000 # Minimum duration of speech before checking for max silence
+    prepend_ms = chunk_size_ms * 3 # Duration of silence to prepend to the next transcription
 
     try:
         silent_ms = 0
@@ -138,7 +135,7 @@ def clean_text(text):
     return text
 
 def session_change(url):
-    with open(const.SESSION_PATH, 'r') as f:
+    with open(config.SESSION_PATH, 'r') as f:
         session = json.load(f)
         if session.get('url', None) != url:
             return True
@@ -152,17 +149,15 @@ def send(dict, audio = None, max_files = 200):
         dict['time'] = datetime.now().strftime("%H:%M:%S")
 
     if audio is not None:
-        from scipy.io.wavfile import write as wavwrite
-        wavwrite(const.AUDIO_DIR + dict['time'].replace(':', '') + '.wav', SAMPLE_RATE, audio)
+        wavwrite(config.AUDIO_DIR + dict['time'].replace(':', '') + '.wav', SAMPLE_RATE, audio)
 
         # limit number of files in audio directory
-        import glob
-        files = glob.glob(const.AUDIO_DIR + '*.wav')
+        files = glob.glob(config.AUDIO_DIR + '*.wav')
         if len(files) > max_files:
             oldest = min(files, key=os.path.getctime)
             os.remove(oldest)
 
-    with open(const.CURRENT_PATH, 'w') as outfile:
+    with open(config.CURRENT_PATH, 'w') as outfile:
         json.dump(dict, outfile)
 
 
@@ -173,13 +168,11 @@ def main(model='medium', language=None, interval=6, preferred_quality="worst",
 
     print("Loading model...")
     model = whisper.load_model(model)
-
-    from vad import VAD
     vad = VAD() if use_vad else None
 
     while True:
-        if os.path.exists(const.SESSION_PATH):
-            with open(const.SESSION_PATH, 'r') as f:
+        if os.path.exists(config.SESSION_PATH):
+            with open(config.SESSION_PATH, 'r') as f:
                 session = json.load(f)
                 current_url = session.get('url', None)
 
