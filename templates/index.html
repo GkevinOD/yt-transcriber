@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+
+    <title>Japanese Analyzer</title>
+    <meta name="description" content="Live stream japanese.">
+    <meta name="author" content="Gabriel Quito">
+
+    <link rel="stylesheet" href="{{ url_for('static',filename='css/styles.css') }}">
+    <script src="{{ url_for('static',filename='js/script.js') }}" defer></script>
+  </head>
+
+  <body>
+    <div class="header">
+      <input type="text" id="txt_url" class="text_box"></input>
+      <button id="btn_load" class="button" style="right: 20px; top: 20px; width: 100px; height: 30px">
+          <span>Load</span>
+      </button>
+    </div>
+
+    <div class="video_transcript_container">
+      <div class="video_transcript_grid_container" style="grid-template-columns: 1fr 8px 400px;">
+        <div id="video_subtitle_container" class="video_subtitle_container">
+          <span id="subtitle_japanese" current="" class="subtitle" style="bottom:60px"></span>
+          <span id="subtitle_english" current="" class="subtitle" style="bottom:30px"></span>
+          <div id="video" class="video"></div>
+        </div>
+
+        <div id="video_transcript_grid_separator" class="video_transcript_grid_separator">
+          <div class="video_transcript_grid_separator_line"></div>
+        </div>
+
+        <div id="transcript" class="transcript_container">
+          <table id="transcript_table" class="transcript_table">
+            <colgroup>
+              <col style="width: 70px">
+              <col style="width: 1fr">
+            </colgroup>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </body>
+</html>
