@@ -81,7 +81,7 @@ def transcribe():
         return ('', 204)
 
     process_args = ['python', const.WHISPER_PROCESS_PATH,
-                    '--model',  'large',
+                    '--model',  'medium',
                     '--task',  'both',
                     '--language', 'Japanese',
                     '--temperature', '0',
