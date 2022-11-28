@@ -100,4 +100,11 @@ def transcribe():
     return ('', 204)
 
 if __name__ == '__main__':
+    # Create audio_dir and session_dir if they don't exist
+    if not os.path.exists(const.AUDIO_DIR):
+        os.makedirs(const.AUDIO_DIR)
+
+    if not os.path.exists(const.SESSION_DIR):
+        os.makedirs(const.SESSION_DIR)
+
     app.run(debug=True)

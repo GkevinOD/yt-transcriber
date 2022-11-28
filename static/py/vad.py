@@ -1,12 +1,12 @@
 import torch
 import warnings
+from constants import SILERO_JIT_PATH
 
 warnings.filterwarnings("ignore")
 
-
 class VAD:
     def __init__(self):
-        self.model = init_jit_model("static\\other\\silero_vad.jit")
+        self.model = init_jit_model(SILERO_JIT_PATH)
 
     def is_silent(self, audio, threshold=0.5):
         return _is_silent(torch.Tensor(audio), self.model, threshold=threshold)
