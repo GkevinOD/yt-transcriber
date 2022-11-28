@@ -1,4 +1,4 @@
 static/session/current.json
 static/session/session.json
 static/session/audio/*.wav
-static/py
+static/py/__pycache__
