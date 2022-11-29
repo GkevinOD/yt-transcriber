@@ -61,8 +61,11 @@ def get_audio(filename):
     return send_from_directory(config.dirs['audio'], filename)
 
 @app.route('/transcribe', methods = ['POST'])
-def transcribe():
+def transcribe_route():
     text = request.form['text']
+    return transcribe(text)
+
+def transcribe(url):
     data = {}
     if os.path.exists(config.paths['session']):
         with open(config.paths['session'], 'r') as json_file:
@@ -71,7 +74,7 @@ def transcribe():
             os.remove(config.paths['session'])
             return transcribe()
 
-        data['url'] = text
+        data['url'] = url
         with open(config.paths['session'], 'w') as outfile:
             json.dump(data, outfile)
 
@@ -82,7 +85,7 @@ def transcribe():
     pid = p.pid
 
     print("Started new session with pid: " + str(pid))
-    dict_out = {'pid': pid, 'url': text}
+    dict_out = {'pid': pid, 'url': url}
     with open(config.paths['session'], 'w') as outfile:
         json.dump(dict_out, outfile)
 

@@ -50,13 +50,64 @@ def open_stream(stream, preferred_quality):
     thread.start()
     return ffmpeg_process, streamlink_process
 
-def process_stream(url, process1, process2, model_whisper, model_silero):
+def process_audio(audio, model, task, q_result, id):
+    result_dict = q_result[id]
+    temperature = [float(x) for x in config.settings['whisper']['temperature'].split(',')]
+    result = model.transcribe(audio,
+                              language=config.settings['whisper']['language'],
+                              task=task,
+                              temperature=temperature,
+                              without_timestamps=True)
+    result_text = ''
+    for segment in result['segments']:
+        result_text += clean_text(segment['text'])
+
+    result_dict['audio'] = audio
+    result_dict[task] = result_text
+
+RETURN_CONTINUE = -1
+RETURN_END = 0
+RETURN_MODEL_CHANGE = 1
+RETURN_SESSION_CHANGE = 2
+def process_stream(url, process1, process2, models_whisper, model_silero):
+    return_code = RETURN_END
+
     try:
         silent_ms = 0
         chunk_history = []
         last_model = config.settings['whisper']['model']
+        last_num_models = config.settings['whisper']['num_models']
+
+        # Create thread for every whisper model
+        threads = [None for _ in range(len(models_whisper))]
+        q_result = {} # Saves results
+        q_next = 0
+
+        def send_q_result(q_result):
+            t = threading.currentThread()
+            while getattr(t, "do_run", True):
+                if len(q_result) > 0:
+                    key, value = next(iter(q_result.items()))
+                    if all(x is not None for x in value.values()):
+                        print(f'Sending out #{key}...')
+
+                        send(value, value.pop('audio'))
+                        q_result.pop(key)
+                        time.sleep(0.5)
+                time.sleep(0.1)
+
+        thread_send = threading.Thread(target=send_q_result, args=(q_result,))
+        thread_send.start()
         while not session_change(url):
-            if config.settings['whisper']['model'] != last_model:
+            if last_model != config.settings['whisper']['model'] or last_num_models != config.settings['whisper']['num_models']:
+                print('Model changed, restarting...')
+                for thread in threads:
+                    if thread is not None:
+                        thread.do_run = False
+                        thread.join()
+                thread_send.do_run = False
+                thread_send.join()
+                return_code = RETURN_MODEL_CHANGE
                 break
 
             CHUNK_SIZE = int((config.settings.getint('process', 'chunk_size_ms') / 1000) * SAMPLE_RATE)
@@ -96,27 +147,20 @@ def process_stream(url, process1, process2, model_whisper, model_silero):
                 if len(audio) >= MAX_AUDIO_LENGTH or (silent_ms >= config.settings.getint('process', 'max_silent_ms') and len(audio) >= MIN_AUDIO_LENGTH): break
 
             task_list = [config.settings['whisper']['task']] if config.settings['whisper']['task'] != 'both' else ['transcribe', 'translate']
-            temperature = [float(x) for x in config.settings['whisper']['temperature'].split(',')]
-
             result_dict = {}
-
-            process_start_time = time.time()
             for task in task_list:
-                result = model_whisper.transcribe(audio,
-                                                  language=config.settings['whisper']['language'],
-                                                  task=task,
-                                                  temperature=temperature,
-                                                  without_timestamps=True,)
+                result_dict[task] = None
+            q_result[q_next] = result_dict
 
-                result_text = ''
-                for segment in result['segments']:
-                    result_text += clean_text(segment['text'])
-
-                result_dict[task] = result_text
-            process_end_time = time.time()
-            print(f'Audio length: {len(audio) / SAMPLE_RATE:.2f}s, Process time: {process_end_time - process_start_time:.2f}s')
-
-            send(result_dict, audio)
+            while len(task_list) > 0:
+                for i, thread in enumerate(threads):
+                    if thread is None or not thread.is_alive():
+                        print(f'Starting {task_list[0]} on thread {i} for #{q_next}')
+                        threads[i] = threading.Thread(target=process_audio, args=(audio, models_whisper[i], task_list.pop(0), q_result, q_next))
+                        threads[i].start()
+                        break
+                time.sleep(0.05)
+            q_next += 1
     except Exception as e:
         # print line number and error
         print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
@@ -124,6 +168,18 @@ def process_stream(url, process1, process2, model_whisper, model_silero):
         process1.kill()
         if process2:
             process2.kill()
+
+    if session_change(url):
+        return_code = RETURN_SESSION_CHANGE
+
+    for thread in threads:
+        if thread is not None:
+            thread.do_run = False
+            thread.join()
+    thread_send.do_run = False
+    thread_send.join()
+
+    return return_code
 
 def clean_text(text):
     if text is None:
@@ -169,38 +225,57 @@ def send(dict, audio = None, max_files = 200):
         json.dump(dict, outfile)
 
 
+def load_whisper_models(model_size='medium', num_models=1):
+    models = []
+    for i in range(num_models):
+        try:
+            print(f'Loading whisper model {i + 1} of {num_models}...')
+            model = whisper.load_model(model_size)
+            models.append(model)
+        except Exception as e:
+            print(f'Error loading model {i + 1}: {e}')
+
+    return models
+
 def main():
-    print('Loading whisper model...')
-    model_whisper = whisper.load_model(config.settings['whisper']['model'])
     print('Loading silero model...')
     model_silero = VAD() if config.settings.getboolean('whisper', 'use_vad') else None
+    models_whisper = None
+    return_code = RETURN_CONTINUE
+    while return_code != RETURN_END:
+        return_code = RETURN_CONTINUE
+        if models_whisper is None:
+            models_whisper = load_whisper_models(model_size=config.settings['whisper']['model'], num_models=config.settings.getint('whisper', 'num_models'))
 
-    last_model = config.settings['whisper']['model']
-    while True:
-        if config.settings['whisper']['model'] != last_model:
-            print('Whisper model size changed, reloading...')
+        if len(models_whisper) == config.settings.getint('whisper', 'num_models'):
+            if os.path.exists(config.paths['session']):
+                with open(config.paths['session'], 'r') as f:
+                    session = json.load(f)
+                    current_url = session.get('url', None)
 
-            print('Unloading whisper model...')
-            del model_whisper
-            from gc import collect as gb_collect
-            gb_collect()
+                try:
+                    process1, process2 = open_stream(current_url, config.settings['whisper']['preferred_quality'])
+                    if process1 is None or process2 is None: continue
 
-            print('Loading new whisper model...')
-            last_model = config.settings['whisper']['model']
-            model_whisper = whisper.load_model(config.settings['whisper']['model'])
+                    return_code = process_stream(current_url, process1, process2, models_whisper, model_silero)
+                except:
+                    pass
+        else:
+            config.settings.set('whisper', 'num_models', str(len(models_whisper)))
+            return_code = RETURN_MODEL_CHANGE
 
-        if os.path.exists(config.paths['session']):
-            with open(config.paths['session'], 'r') as f:
-                session = json.load(f)
-                current_url = session.get('url', None)
+        if return_code == RETURN_MODEL_CHANGE:
+            for model in models_whisper:
+                del model
+            models_whisper = None
 
-            try:
-                process1, process2 = open_stream(current_url, config.settings['whisper']['preferred_quality'])
-                if process1 is None or process2 is None: continue
+            time.sleep(5)
 
-                process_stream(current_url, process1, process2, model_whisper, model_silero)
-            except:
-                pass
+            from gc import collect
+            collect()
+
+            from torch.cuda import empty_cache
+            empty_cache()
 
         time.sleep(1)
 
