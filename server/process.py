@@ -50,21 +50,17 @@ def open_stream(stream, preferred_quality):
     thread.start()
     return ffmpeg_process, streamlink_process
 
-def process_stream(url, process1, process2, n_bytes, model, language, vad, task_list, **decode_options):
-    chunk_size_ms = 250
-    max_silent_ms = 1000 # Duration of silence before forcing a transcription
-    min_speech_ms = 1000 # Minimum duration of speech before checking for max silence
-    prepend_ms = chunk_size_ms * 3 # Duration of silence to prepend to the next transcription
-
+def process_stream(url, process1, process2, model_whisper, model_silero):
     try:
         silent_ms = 0
-
-        CHUNK_SIZE = int((chunk_size_ms / 1000) * (SAMPLE_RATE))
-        PREPEND_SIZE = int((prepend_ms / 1000) * (SAMPLE_RATE))
-        MIN_SPEECH = int((min_speech_ms / 1000) * (SAMPLE_RATE))
-
         chunk_history = []
         while not session_change(url):
+            CHUNK_SIZE = int((config.settings.getint('process', 'chunk_size_ms') / 1000) * SAMPLE_RATE)
+            PREPEND_SIZE = int((config.settings.getint('process', 'prepend_ms') / 1000) * SAMPLE_RATE)
+
+            MIN_AUDIO_LENGTH = int((config.settings.getint('process', 'min_speech_ms') / 1000) * SAMPLE_RATE)
+            MAX_AUDIO_LENGTH = config.settings.getint('whisper', 'interval') * SAMPLE_RATE
+
             audio = None # Stores audio data up to interval length
             while process1.poll() is None:
                 in_bytes = process1.stdout.read(CHUNK_SIZE * 2) # Factor of 2 comes from reading int16 as bytes
@@ -72,16 +68,18 @@ def process_stream(url, process1, process2, n_bytes, model, language, vad, task_
 
                 chunk = np.frombuffer(in_bytes, np.int16).flatten().astype(np.float32) / 32768.0
                 chunk_history.append(chunk)
-                if len(chunk_history) > (max_silent_ms / chunk_size_ms):
+                if len(chunk_history) > (config.settings.getint('process', 'max_silent_ms') / config.settings.getint('process', 'chunk_size_ms')):
                     chunk_history.pop(0)
 
                 # Process audio with vad
-                if vad is not None and vad.is_silent(chunk, threshold=0.5 if audio is None else 0.25):
+                threshold_high = config.settings.getfloat('silero', 'threshold_high')
+                threshold_low = config.settings.getfloat('silero', 'threshold_low')
+                if model_silero is not None and model_silero.is_silent(chunk, threshold=threshold_high if audio is None else threshold_low):
                     if audio is None:
                         silent_ms = 0
                         continue
                     else:
-                        silent_ms += chunk_size_ms
+                        silent_ms += config.settings.getint('process', 'chunk_size_ms')
                 else:
                     silent_ms = 0
 
@@ -91,16 +89,19 @@ def process_stream(url, process1, process2, n_bytes, model, language, vad, task_
                 else:
                     audio = np.concatenate([audio, chunk]) if audio is not None else chunk
 
-                if len(audio) >= n_bytes or (silent_ms >= max_silent_ms and len(audio) >= MIN_SPEECH): break
+                if len(audio) >= MAX_AUDIO_LENGTH or (silent_ms >= config.settings.getint('process', 'max_silent_ms') and len(audio) >= MIN_AUDIO_LENGTH): break
 
             # Transcribe and/or translate add to buffers
+            task_list = [config.settings['whisper']['task']] if config.settings['whisper']['task'] != 'both' else ['transcribe', 'translate']
+            temperature = [float(x) for x in config.settings['whisper']['temperature'].split(',')]
+
             result_dict = {}
             for task in task_list:
-                result = model.transcribe(audio,
-                                          language=language,
-                                          without_timestamps=True,
-                                          task=task,
-                                          **decode_options)
+                result = model_whisper.transcribe(audio,
+                                                  language=config.settings['whisper']['language'],
+                                                  task=task,
+                                                  temperature=temperature,
+                                                  without_timestamps=True,)
 
                 result_text = ""
                 for segment in result["segments"]:
@@ -135,7 +136,7 @@ def clean_text(text):
     return text
 
 def session_change(url):
-    with open(config.SESSION_PATH, 'r') as f:
+    with open(config.paths['session'], 'r') as f:
         session = json.load(f)
         if session.get('url', None) != url:
             return True
@@ -149,108 +150,39 @@ def send(dict, audio = None, max_files = 200):
         dict['time'] = datetime.now().strftime("%H:%M:%S")
 
     if audio is not None:
-        wavwrite(config.AUDIO_DIR + dict['time'].replace(':', '') + '.wav', SAMPLE_RATE, audio)
+        wavwrite(config.dirs['audio'] + dict['time'].replace(':', '') + '.wav', SAMPLE_RATE, audio)
 
         # limit number of files in audio directory
-        files = glob.glob(config.AUDIO_DIR + '*.wav')
+        files = glob.glob(config.dirs['audio'] + '*.wav')
         if len(files) > max_files:
             oldest = min(files, key=os.path.getctime)
             os.remove(oldest)
 
-    with open(config.CURRENT_PATH, 'w') as outfile:
+    with open(config.paths['current'], 'w') as outfile:
         json.dump(dict, outfile)
 
 
-def main(model='medium', language=None, interval=6, preferred_quality="worst",
-         use_vad=True, task=['translate'], **decode_options):
-
-    n_bytes = interval * SAMPLE_RATE
+def main():
 
     print("Loading model...")
-    model = whisper.load_model(model)
-    vad = VAD() if use_vad else None
+    model_whisper = whisper.load_model(config.settings['whisper']['model'])
+    model_silero = VAD() if config.settings.getboolean('whisper', 'use_vad') else None
 
     while True:
-        if os.path.exists(config.SESSION_PATH):
-            with open(config.SESSION_PATH, 'r') as f:
+        if os.path.exists(config.paths['session']):
+            with open(config.paths['session'], 'r') as f:
                 session = json.load(f)
                 current_url = session.get('url', None)
 
             try:
-                process1, process2 = open_stream(current_url, preferred_quality)
+                process1, process2 = open_stream(current_url, config.settings['whisper']['preferred_quality'])
                 if process1 is None or process2 is None: continue
 
-                process_stream(current_url, process1, process2, n_bytes, model, language, vad, task, **decode_options)
+                process_stream(current_url, process1, process2, model_whisper, model_silero)
             except:
                 pass
 
         time.sleep(1)
 
-def cli():
-    parser = argparse.ArgumentParser(description="Parameters for translator.py")
-    parser.add_argument('--model', type=str,
-                        choices=['tiny', 'tiny.en', 'small', 'small.en', 'medium', 'medium.en', 'large'],
-                        default='small',
-                        help='Model to be used for generating audio transcription. Smaller models are faster and use '
-                             'less VRAM, but are also less accurate. .en models are more accurate but only work on '
-                             'English audio.')
-    parser.add_argument('--task', type=str, choices=['transcribe', 'translate', 'both'], default='translate',
-                        help='Whether to transcribe the audio (keep original language) or translate to English.')
-    parser.add_argument('--language', type=str, default='auto',
-                        help='Language spoken in the stream. Default option is to auto detect the spoken language. '
-                             'See https://github.com/openai/whisper for available languages.')
-    parser.add_argument('--interval', type=int, default=5,
-                        help='Interval between calls to the language model in seconds.')
-    parser.add_argument('--temperature', type=str, default='0,0.25,0.5',
-                        help='Temperature to use for the language model. Higher values lead to more creative. Separate by comma for multiple values.')
-    parser.add_argument('--beam_size', type=int, default=5,
-                        help='Number of beams in beam search. Set to 0 to use greedy algorithm instead.')
-    parser.add_argument('--best_of', type=int, default=5,
-                        help='Number of candidates when sampling with non-zero temperature.')
-    parser.add_argument('--preferred_quality', type=str, default='audio_only',
-                        help='Preferred stream quality option. "best" and "worst" should always be available. Type '
-                             '"streamlink URL" in the console to see quality options for your URL.')
-    parser.add_argument('--use_vad', type=bool, default=True,
-                        help='Enable voice activity detection with Silero VAD.')
-
-    args = parser.parse_args().__dict__
-
-    if args['model'].endswith('.en'):
-        if args['model'] == 'large.en':
-            print("English model does not have large model, please choose from {tiny.en, small.en, medium.en}")
-            sys.exit(0)
-        if args['language'] != 'English' and args['language'] != 'en':
-            if args['language'] == 'auto':
-                print("Using .en model, setting language from auto to English")
-                args['language'] = 'en'
-            else:
-                print("English model cannot be used to detect non english language, please choose a non .en model")
-                sys.exit(0)
-
-    if args['language'] == 'English':
-        args['task'] = 'transcribe'
-        if args['model'] != 'large' and not args['model'].endswith('.en'):
-            print("English language detected, changing model to english model.")
-            args['model'] += '.en'
-
-    if args['task'] == 'both':
-        args['task'] = ['transcribe', 'translate']
-    else:
-        args['task'] = [args['task']]
-
-    try:
-        args['temperature'] = [float(t) for t in args['temperature'].split(',')]
-    except ValueError:
-        print("Temperature must be a comma separated list of floats")
-        sys.exit(0)
-
-    if args['language'] == 'auto':
-        args['language'] = None
-
-    if args['beam_size'] == 0:
-        args['beam_size'] = None
-
-    main(**args)
-
 if __name__ == '__main__':
-    cli()
+    main()

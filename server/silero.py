@@ -6,7 +6,7 @@ warnings.filterwarnings("ignore")
 
 class VAD:
     def __init__(self):
-        self.model = init_jit_model(config.SILERO_JIT_PATH)
+        self.model = init_jit_model(config.paths['silero'])
 
     def is_silent(self, audio, threshold=0.5):
         return _is_silent(torch.Tensor(audio), self.model, threshold=threshold)
@@ -20,8 +20,8 @@ def init_jit_model(model_path: str, device=torch.device('cpu')):
 def _is_silent(  audio: torch.Tensor,
                 model,
                 threshold: float = 0.5,
-                min_speech_duration_ms: int = 75,
-                min_silence_duration_ms: int = 100,
+                min_speech_duration_ms: int = config.settings.getint('silero', 'min_speech_duration_ms'),
+                min_silence_duration_ms: int = config.settings.getint('silero', 'min_silence_duration_ms'),
                 sampling_rate: int = 16000,
                 window_size_samples: int = 1536):
 
