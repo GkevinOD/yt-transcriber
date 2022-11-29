@@ -14,7 +14,7 @@ from silero import VAD
 def open_stream(stream, preferred_quality):
     stream_options = streamlink.streams(stream)
     if not stream_options:
-        print("No playable streams found on this URL:", stream)
+        print('No playable streams found on this URL:', stream)
         return None, None
 
     option = None
@@ -34,17 +34,17 @@ def open_stream(stream, preferred_quality):
             except (BrokenPipeError, OSError):
                 pass
 
-    cmd = ['streamlink', stream, option, "-O"]
+    cmd = ['streamlink', stream, option, '-O']
     streamlink_process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
 
     try:
         ffmpeg_process = (
-            ffmpeg.input("pipe:", loglevel="panic")
-            .output("pipe:", format="s16le", acodec="pcm_s16le", ac=1, ar=SAMPLE_RATE)
+            ffmpeg.input('pipe:', loglevel='panic')
+            .output('pipe:', format='s16le', acodec='pcm_s16le', ac=1, ar=SAMPLE_RATE)
             .run_async(pipe_stdin=True, pipe_stdout=True)
         )
     except ffmpeg.Error as e:
-        raise RuntimeError(f"Failed to load audio: {e.stderr.decode()}") from e
+        raise RuntimeError(f'Failed to load audio: {e.stderr.decode()}') from e
 
     thread = threading.Thread(target=writer, args=(streamlink_process, ffmpeg_process))
     thread.start()
@@ -54,7 +54,11 @@ def process_stream(url, process1, process2, model_whisper, model_silero):
     try:
         silent_ms = 0
         chunk_history = []
+        last_model = config.settings['whisper']['model']
         while not session_change(url):
+            if config.settings['whisper']['model'] != last_model:
+                break
+
             CHUNK_SIZE = int((config.settings.getint('process', 'chunk_size_ms') / 1000) * SAMPLE_RATE)
             PREPEND_SIZE = int((config.settings.getint('process', 'prepend_ms') / 1000) * SAMPLE_RATE)
 
@@ -91,11 +95,12 @@ def process_stream(url, process1, process2, model_whisper, model_silero):
 
                 if len(audio) >= MAX_AUDIO_LENGTH or (silent_ms >= config.settings.getint('process', 'max_silent_ms') and len(audio) >= MIN_AUDIO_LENGTH): break
 
-            # Transcribe and/or translate add to buffers
             task_list = [config.settings['whisper']['task']] if config.settings['whisper']['task'] != 'both' else ['transcribe', 'translate']
             temperature = [float(x) for x in config.settings['whisper']['temperature'].split(',')]
 
             result_dict = {}
+
+            process_start_time = time.time()
             for task in task_list:
                 result = model_whisper.transcribe(audio,
                                                   language=config.settings['whisper']['language'],
@@ -103,16 +108,18 @@ def process_stream(url, process1, process2, model_whisper, model_silero):
                                                   temperature=temperature,
                                                   without_timestamps=True,)
 
-                result_text = ""
-                for segment in result["segments"]:
-                    result_text += clean_text(segment["text"])
+                result_text = ''
+                for segment in result['segments']:
+                    result_text += clean_text(segment['text'])
 
                 result_dict[task] = result_text
+            process_end_time = time.time()
+            print(f'Audio length: {len(audio) / SAMPLE_RATE:.2f}s, Process time: {process_end_time - process_start_time:.2f}s')
 
             send(result_dict, audio)
     except Exception as e:
         # print line number and error
-        print("Error on line {}".format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+        print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
     finally:
         process1.kill()
         if process2:
@@ -120,7 +127,7 @@ def process_stream(url, process1, process2, model_whisper, model_silero):
 
 def clean_text(text):
     if text is None:
-        return ""
+        return ''
 
     # remove consecutive characters at the end of the string
     for length in range(1, int(len(text) / 3)):
@@ -128,7 +135,7 @@ def clean_text(text):
         if text.endswith(substr * 3):
             while text.endswith(substr * 2):
                 text = text[:-length]
-    text = " ".join(text.split())
+    text = ' '.join(text.split())
 
     # remove spaces at the beginning and end
     text = text.strip()
@@ -144,10 +151,10 @@ def session_change(url):
 
 def send(dict, audio = None, max_files = 200):
     if dict.get('transcribe') is None and dict.get('translate') is None: return
-    if dict.get('transcribe') == "" and dict.get('translate') == "": return
+    if dict.get('transcribe') == '' and dict.get('translate') == '': return
 
     if dict.get('time') is None:
-        dict['time'] = datetime.now().strftime("%H:%M:%S")
+        dict['time'] = datetime.now().strftime('%H:%M:%S')
 
     if audio is not None:
         wavwrite(config.dirs['audio'] + dict['time'].replace(':', '') + '.wav', SAMPLE_RATE, audio)
@@ -163,12 +170,25 @@ def send(dict, audio = None, max_files = 200):
 
 
 def main():
-
-    print("Loading model...")
+    print('Loading whisper model...')
     model_whisper = whisper.load_model(config.settings['whisper']['model'])
+    print('Loading silero model...')
     model_silero = VAD() if config.settings.getboolean('whisper', 'use_vad') else None
 
+    last_model = config.settings['whisper']['model']
     while True:
+        if config.settings['whisper']['model'] != last_model:
+            print('Whisper model size changed, reloading...')
+
+            print('Unloading whisper model...')
+            del model_whisper
+            from gc import collect as gb_collect
+            gb_collect()
+
+            print('Loading new whisper model...')
+            last_model = config.settings['whisper']['model']
+            model_whisper = whisper.load_model(config.settings['whisper']['model'])
+
         if os.path.exists(config.paths['session']):
             with open(config.paths['session'], 'r') as f:
                 session = json.load(f)
