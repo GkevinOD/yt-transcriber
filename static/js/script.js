@@ -185,7 +185,7 @@ function onYouTubeIframeAPIReady() {
     player = new YT.Player('video', {
         videoId: video_id,
         events: {
-            'onReady': function (e) {e.target.playVideo();}
+            //'onReady': function (e) {e.target.playVideo();}
         }
     });
 }
@@ -204,29 +204,18 @@ function load_video() {
     });
 }
 
-update();
-
-var last_time = "";
-function update() {
-    form = new FormData();
-    form.append("text", last_time);
-    fetch("/update", {
-        method: "post",
-        body: form
-    }).then(response => response.json()).then(data => {
-        if (data.time != null) {
-            last_time = data.time;
-            data.english = data.translate;
-            data.japanese = data.transcribe;
-            if (data.english != "" || data.japanese != "") {
-                append_transcription(data);
-            }
+var socket = io();
+socket.on('update', function(data) {
+    console.log("Got some data.");
+    if (data.time != null) {
+        last_time = data.time;
+        data.english = data.translate;
+        data.japanese = data.transcribe;
+        if (data.english != "" || data.japanese != "") {
+            append_transcription(data);
         }
-
-        update();
-    });
-}
-
+    }
+});
 
 var transcription = [];
 var current_id = -1;

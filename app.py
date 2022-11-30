@@ -1,35 +1,16 @@
 from flask import Flask, render_template, request, send_from_directory
+from flask_socketio import SocketIO, emit
 from flask.json import jsonify
-import os, json, time, subprocess, psutil
+import os, json, time, subprocess, psutil, threading
 
 import server.ichi_moe as process_text
 import server.config as config
-
-import atexit
-def exit_handler():
-    if os.path.exists(config.paths['current']):
-        os.remove(config.paths['current'])
-
-    if os.path.exists(config.paths['session']):
-        with open(config.paths['session'], 'r') as json_file:
-            data = json.load(json_file)
-        is_running = psutil.pid_exists(data.get('pid'))
-        if is_running:
-            p = psutil.Process(data.get('pid'))
-            p.terminate()
-        os.remove(config.paths['session'])
-
-    if os.path.exists(config.dirs['audio']):
-        # delete all files in audio folder
-        for file in os.listdir(config.dirs['audio']):
-            os.remove(os.path.join(config.dirs['audio'], file))
-
-atexit.register(exit_handler)
 
 app = Flask(__name__)
 app.config.update(
     TESTING=True
 )
+socketio = SocketIO(app)
 
 @app.route('/')
 def home():
@@ -91,12 +72,38 @@ def transcribe(url):
 
     return ('', 204)
 
+def update_thread():
+    last_modified = None
+    while getattr(threading.currentThread(), "do_run", True):
+        try:
+            # Check if file has been updated
+            modified = os.path.getmtime(config.paths['current'])
+            if last_modified == None or modified != last_modified:
+                last_modified = modified
+                with open(config.paths['current'], 'r') as json_file:
+                    data = json.load(json_file)
+                socketio.emit('update', data)
+        except:
+            pass
+        time.sleep(0.1)
+
 if __name__ == '__main__':
-    # Create audio_dir and session_dir if they don't exist
-    if not os.path.exists(config.dirs['audio']):
-        os.makedirs(config.dirs['audio'])
+    try:
+        # Prepare session and audio directories
+        if not os.path.exists(config.dirs['audio']):
+            os.makedirs(config.dirs['audio'])
 
-    if not os.path.exists(config.dirs['session']):
-        os.makedirs(config.dirs['session'])
+        if not os.path.exists(config.dirs['session']):
+            os.makedirs(config.dirs['session'])
 
-    app.run(debug=True)
+        # Start update thread as daemon
+        update_thread = threading.Thread(target=update_thread)
+        update_thread.daemon = True
+        update_thread.start()
+
+        socketio.run(app, debug=True)
+    finally:
+        # Delete session
+        if os.path.exists(config.dirs['session']):
+            from shutil import rmtree
+            rmtree(config.dirs['session'])
