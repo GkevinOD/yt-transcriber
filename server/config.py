@@ -15,7 +15,7 @@ settings.read('server/settings.ini')
 def reload_settings():
     last_modified = os.path.getmtime('server/settings.ini')
     while True:
-        time.sleep(5)
+        time.sleep(1)
         if os.path.getmtime('server/settings.ini') != last_modified:
             settings.read('server/settings.ini')
             last_modified = os.path.getmtime('server/settings.ini')
