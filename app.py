@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit
+from pyngrok import ngrok
 from flask.json import jsonify
 import os, json, time, subprocess, psutil, threading
 
@@ -8,6 +9,13 @@ import server.config as config
 
 app = Flask(__name__)
 socketio = SocketIO(app)
+
+# Open a ngrok tunnel to the HTTP server
+public_url = ngrok.connect(5000).public_url
+print(" * ngrok tunnel \"{}\" -> \"http://127.0.0.1:{}/\"".format(public_url, 5000))
+
+# Update any base URLs to use the public ngrok URL
+app.config["BASE_URL"] = public_url
 
 @app.route('/')
 def home():

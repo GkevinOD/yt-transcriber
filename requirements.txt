@@ -2,5 +2,6 @@ git+https://github.com/openai/whisper.git
 ffmpeg-python
 flask
 flask_socketio
+pyngrok
 torch
 streamlink
