@@ -150,10 +150,12 @@ def process_stream(url, process1, process2, models_whisper, model_silero, socket
             CHUNK_SIZE = int((config.settings.getint('process', 'chunk_size_ms') / 1000) * SAMPLE_RATE)
             PREPEND_SIZE = int((config.settings.getint('process', 'prepend_ms') / 1000) * SAMPLE_RATE)
 
-            MIN_AUDIO_LENGTH = int((config.settings.getint('process', 'min_speech_ms') / 1000) * SAMPLE_RATE)
             MAX_AUDIO_LENGTH = config.settings.getint('whisper', 'interval') * SAMPLE_RATE
 
             audio = None # Stores audio data up to interval length
+            silent_ms = 0
+            speech_ms = 0
+            max_speech = 0
             while process1.poll() is None:
                 in_bytes = process1.stdout.read(CHUNK_SIZE * 2) # Factor of 2 comes from reading int16 as bytes
                 if not in_bytes:
@@ -169,13 +171,13 @@ def process_stream(url, process1, process2, models_whisper, model_silero, socket
                 threshold_high = config.settings.getfloat('silero', 'threshold_high')
                 threshold_low = config.settings.getfloat('silero', 'threshold_low')
                 if model_silero is not None and model_silero.is_silent(chunk, threshold=threshold_high if audio is None else threshold_low):
-                    if audio is None:
-                        silent_ms = 0
-                        continue
-                    else:
-                        silent_ms += config.settings.getint('process', 'chunk_size_ms')
+                    speech_ms = 0
+                    silent_ms += config.settings.getint('process', 'chunk_size_ms') if audio is not None else 0
+                    if audio is None: continue
                 else:
                     silent_ms = 0
+                    speech_ms += config.settings.getint('process', 'chunk_size_ms')
+                    max_speech = max(max_speech, speech_ms)
 
                 # Append chunk to buffer
                 if audio is None and (PREPEND_SIZE != 0):
@@ -183,7 +185,11 @@ def process_stream(url, process1, process2, models_whisper, model_silero, socket
                 else:
                     audio = np.concatenate([audio, chunk]) if audio is not None else chunk
 
-                if len(audio) >= MAX_AUDIO_LENGTH or (silent_ms >= config.settings.getint('process', 'max_silent_ms') and len(audio) >= MIN_AUDIO_LENGTH): break
+                if len(audio) >= MAX_AUDIO_LENGTH or silent_ms >= config.settings.getint('process', 'max_silent_ms'):
+                    if max_speech < config.settings.getint('process', 'min_speech_ms'):
+                        audio = None
+                    else:
+                        break
             else:
                 print('Stream process has ended, exiting...')
                 return STREAM_PROCESS_END
