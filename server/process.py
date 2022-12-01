@@ -6,7 +6,9 @@ import ffmpeg, streamlink, subprocess, threading
 from scipy.io.wavfile import write as wavwrite
 
 import numpy as np
-import config
+if 'config' not in sys.modules:
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    import config
 
 import whisper
 from whisper.audio import SAMPLE_RATE
@@ -74,7 +76,26 @@ def process_audio(audio, model, task, q_dict, key, attempt=0):
     if all(value is not None for value in result_dict.values()):
         result_dict['time_end'] = time.time()
 
-def send_result(q_dict):
+
+def send(dict, socketio, audio = None, max_files = 200):
+    if dict.get('transcribe') is None and dict.get('translate') is None: return
+    if dict.get('transcribe') == '' and dict.get('translate') == '': return
+
+    if dict.get('time') is None:
+        dict['time'] = datetime.now().strftime('%H:%M:%S')
+
+    if audio is not None:
+        wavwrite(config.dirs['audio'] + dict['time'].replace(':', '') + '.wav', SAMPLE_RATE, audio)
+
+        # limit number of files in audio directory
+        files = glob.glob(config.dirs['audio'] + '*.wav')
+        if len(files) > max_files:
+            oldest = min(files, key=os.path.getctime)
+            os.remove(oldest)
+
+    socketio.emit('update', dict)
+
+def send_result(q_dict, socketio):
     while getattr(threading.currentThread(), "do_run", True):
         if len(q_dict) == 0: continue
         q_front_key, q_front_value = next(iter(q_dict.items()))
@@ -85,7 +106,7 @@ def send_result(q_dict):
             audio = q_front_value.pop('audio')
 
             print(f'Key: {q_front_key}, Audio length: {len(audio) / SAMPLE_RATE:.2f}s, Process time: {time_elapse:.2f}s')
-            send(q_front_value, audio)
+            send(q_front_value, socketio, audio)
 
             q_dict.pop(q_front_key)
         time.sleep(0.5)
@@ -104,8 +125,7 @@ def model_change(last_model, last_num_models):
         return MODEL_CHANGE
     return 0
 
-def process_stream(url, process1, process2, models_whisper, model_silero):
-    silent_ms = 0
+def process_stream(url, process1, process2, models_whisper, model_silero, socketio):
     chunk_history = []
 
     # For checking model changes that require reloading
@@ -118,7 +138,7 @@ def process_stream(url, process1, process2, models_whisper, model_silero):
     q_key = 0
 
     # Thread to send results
-    thread_send = threading.Thread(target=send_result, args=(q_dict,))
+    thread_send = threading.Thread(target=send_result, args=(q_dict, socketio))
     thread_send.start()
     try:
         model_silero.model.reset_states()
@@ -220,25 +240,6 @@ def clean_text(text):
 
     return text
 
-def send(dict, audio = None, max_files = 200):
-    if dict.get('transcribe') is None and dict.get('translate') is None: return
-    if dict.get('transcribe') == '' and dict.get('translate') == '': return
-
-    if dict.get('time') is None:
-        dict['time'] = datetime.now().strftime('%H:%M:%S')
-
-    if audio is not None:
-        wavwrite(config.dirs['audio'] + dict['time'].replace(':', '') + '.wav', SAMPLE_RATE, audio)
-
-        # limit number of files in audio directory
-        files = glob.glob(config.dirs['audio'] + '*.wav')
-        if len(files) > max_files:
-            oldest = min(files, key=os.path.getctime)
-            os.remove(oldest)
-
-    with open(config.paths['current'], 'w') as outfile:
-        json.dump(dict, outfile)
-
 def unload_model(model):
     print('Unloading model...')
     del model
@@ -258,7 +259,7 @@ def load_whisper_models(model_size='medium', num_models=1):
 
     return models
 
-def main():
+def main(socketio):
     print('Loading silero model...')
     model_silero = VAD() if config.settings.getboolean('whisper', 'use_vad') else None
     models_whisper = None
@@ -281,22 +282,22 @@ def main():
                     process1, process2 = open_stream(current_url, config.settings['whisper']['preferred_quality'])
                     if process1 is None or process2 is None: continue
 
-                    model_status = process_stream(current_url, process1, process2, models_whisper, model_silero)
+                    model_status = process_stream(current_url, process1, process2, models_whisper, model_silero, socketio)
                 except Exception as e:
                     print(f'Error processing stream: {e}')
         else:
             print('No whisper models loaded, exiting...')
-            sys.exit(2)
 
         if model_status == MODEL_CHANGE:
             print('Model changed detected, resetting...')
             while len(models_whisper) > 0:
                 unload_model(models_whisper.pop(0))
         elif model_status == STREAM_PROCESS_END:
-            print('Exiting subprocess...')
-            sys.exit(0)
+            # Delete session file
+            if os.path.exists(config.paths['session']):
+                os.remove(config.paths['session'])
 
         time.sleep(1)
 
 if __name__ == '__main__':
-    main()
+    main(None)
