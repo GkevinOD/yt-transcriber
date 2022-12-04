@@ -1,12 +1,12 @@
 import configparser, os, time, threading
 
-paths = {"session": 'server/session/session.json',
-         "current": 'server/session/current.json',
-         "process": 'server/process.py',
-         "silero": 'server/models/silero_vad.jit'}
+paths = {'process': 'server/process.py',
+         'silero': 'server/models/silero_vad.jit'}
 
-dirs = {"audio": 'server/session/audio/',
-        "session": 'server/session/'}
+dirs = {'audio': 'server/session/audio/',
+        'session': 'server/session/'}
+
+session = ''
 
 settings = configparser.ConfigParser()
 settings.read('server/settings.ini')

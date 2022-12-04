@@ -31,12 +31,13 @@ def process():
 def get_audio(filename):
     return send_from_directory(config.dirs['audio'], filename)
 
-@app.route('/transcribe', methods = ['POST'])
-def transcribe_route():
-    url = request.form['text']
-    with open(config.paths['session'], 'w') as outfile:
-        json.dump({'url': url}, outfile)
-    return ('', 204)
+@app.route('/session', methods = ['GET'])
+def get_session():
+	return config.session
+
+@socketio.on('load')
+def load(data):
+	config.session = data
 
 if __name__ == '__main__':
     try:
@@ -49,7 +50,8 @@ if __name__ == '__main__':
 
         # Start whisper and silero
         from server.process import main
-        p_thread = threading.Thread(target=main, args=(socketio, ))
+		from server.silero import VAD
+		p_thread = threading.Thread(target=main, args=(socketio, config, VAD))
         p_thread.daemon = True
         p_thread.start()
 
