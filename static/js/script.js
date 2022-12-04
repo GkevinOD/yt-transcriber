@@ -1,348 +1,157 @@
+/* Global variables */
+var YTPlayer = null;
+var SocketIO = io();
 
-// #region Resize video transcript container
-var video = document.getElementById("video");
+/* Styling */
+function resizeVideoComponents() {
+	// Resize and reposition subtitles
+	var subtitles = document.getElementsByClassName("subtitle-wrapper");
+	for (var i = 0; i < subtitles.length; i++) {
+		const element = subtitles[i];
+		const container = element.parentElement;
+		element.style.maxWidth = container.offsetWidth - container.offsetLeft + "px";
+		element.style.top = container.offsetHeight + container.offsetTop - element.offsetHeight + "px";
+		element.style.left = (container.offsetWidth - element.offsetWidth) / 2 + container.offsetLeft + "px";
+	}
 
-resize_separator = document.getElementById("video_transcript_grid_separator");
-resize_separator.addEventListener("mousedown", resize_mD);
+	// Reposition fullscreen button
+	const element = document.getElementById("fullscreen");
+	if (fullscreen) {
+		const container = element.parentElement;
 
-function resize_mD(event) {
-    if (event.button != 0) return;
-
-    video.style.pointerEvents = "none";
-    document.addEventListener("mousemove", resize_mM);
-    document.addEventListener("mouseup", resize_end);
+		element.style.top = container.offsetHeight + container.offsetTop - element.offsetHeight - 50 + "px";
+		element.style.right = (document.body.offsetWidth - container.offsetWidth + (container.offsetWidth * 0.005)) + "px";
+	}
 }
 
-function resize_mM(event) {
-    //1fr 8px 400px
-    let node = resize_separator.parentElement;
-    document.getElementById("transcript_table").hidden = true;
+var ROVideoComponents = new ResizeObserver(resizeVideoComponents);
+ROVideoComponents.observe(document.getElementById("main-player-container"));
 
-    var template_column = node.style.gridTemplateColumns.split(" ");
-    let new_pos = (node.clientWidth - event.clientX);
-
-    template_column[2] = new_pos + "px";
-    node.style.gridTemplateColumns = template_column.join(" ");
-
-    resize_event_subtitle()
+// Buttons with class toggle will stay pressed when clicked
+var toggles = document.querySelectorAll("button.toggle");
+for (var i = 0; i < toggles.length; i++) {
+	toggles[i].addEventListener("click", function() {
+		var element = document.getElementById(this.id);
+		element.classList.toggle("active");
+	});
 }
 
-function resize_end() {
-    document.getElementById("transcript_table").hidden = false;
-    video.style.pointerEvents = "auto";
+/* Event listeners */
+document.getElementById("color-scheme").addEventListener("click", toggleColorScheme);
+document.getElementById("fullscreen").addEventListener("click", function() {
+	document.getElementById("main-player-container").classList.toggle("fullscreen");
+	if (!document.fullscreenElement) {
+		document.getElementById("main-player-container").requestFullscreen();
+	} else {
+		document.exitFullscreen();
+	}
+});
+document.getElementById("submit-link").addEventListener("click", function() {
+	var url = document.getElementById("link").value;
+	var id = url.split("v=")[1];
+	var ampersandPosition = id.indexOf("&");
+	if (ampersandPosition != -1) {
+		id = id.substring(0, ampersandPosition);
+	}
 
-    document.removeEventListener("mouseup", resize_end);
-    document.removeEventListener("mousemove", resize_mM);
-}
-// #endregion
+	if(YTPlayer) {
+		YTPlayer.loadVideoById(id);
+		SocketIO.emit("load", url);
+		//document.getElementById("main-player-container").requestFullscreen();
+	} else {
+		var tag = document.createElement('script');
+		tag.src = "https://www.youtube.com/iframe_api";
+		var firstScriptTag = document.getElementsByTagName('script')[0];
+		firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+	}
+});
+document.getElementById("settings").addEventListener("click", function() {
+	document.getElementById("main-settings").classList.toggle("hidden");
+})
 
-// #region Drag to scroll transcription
-transcript_container = document.getElementById("transcript")
-transcript_container.addEventListener("mousedown", scroll_mD);
 
-var pos = { top: 0, left: 0, x: 0, y: 0 };
-function scroll_mD(event) {
-    if (event.button != 0) return;
-
-    pos = {
-        left: transcript_container.scrollLeft,
-        top: transcript_container.scrollTop,
-        x: event.clientX,
-        y: event.clientY,
-    };
-
-    document.addEventListener('mousemove', scroll_mM);
-    document.addEventListener('mouseup', scroll_end);
-}
-
-function scroll_mM(event) {
-    transcript_container.style.cursor = 'grabbing';
-    transcript_container.style.userSelect = 'none';
-
-    const dx = event.clientX - pos.x;
-    const dy = event.clientY - pos.y;
-
-    transcript_container.scrollTop = pos.top - dy;
-    transcript_container.scrollLeft = pos.left - dx;
-}
-
-function scroll_end() {
-    transcript_container.style.cursor = 'default';
-    document.removeEventListener('mouseup', scroll_end);
-    document.removeEventListener('mousemove', scroll_mM);
-};
-// #endregion
-
-// #region Drag to move subtitle
-var subtitle_japanese = document.getElementById("subtitle_japanese");
-var subtitle_english = document.getElementById("subtitle_english");
-subtitle_japanese.addEventListener("mousedown", drag_mD);
-subtitle_english.addEventListener("mousedown", drag_mD);
-
-var drag_bottom = 0;
-var drag_mouseY = 0;
-var event_target = null;
-function drag_mD(event) {
-    if(event.button != 1) return;
-    if(event.target.parentElement == null || event.target.parentElement.className != "word_container") return;
-    event_target = event.target.parentElement.parentElement;
-    if(event_target == null || event_target.className != "subtitle") return;
-
-    video.style.pointerEvents = "none";
-    drag_bottom = event_target.style.bottom.replace("px", "");
-    drag_mouseY = event.clientY;
-
-    document.addEventListener('mousemove', drag_mM);
-    document.addEventListener('mouseup', drag_end);
+/* Initialize */
+// Color scheme
+switch(localStorage.getItem("dark-mode")) {
+	case "true":
+		toggleColorScheme();
+		break;
+	case null:
+		if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+			toggleColorScheme();
 }
 
-function drag_mM(event) {
-    const dy = event.clientY - drag_mouseY;
-    let video_subtitle_container = document.getElementById("video_subtitle_container");
-    const maxBottom = video_subtitle_container.clientHeight;
-
-    event_target.style.bottom = Math.min(Math.max(drag_bottom - dy, -event_target.clientHeight), maxBottom) + "px";
-}
-
-function drag_end() {
-    video.style.pointerEvents = "auto";
-    document.removeEventListener('mouseup', drag_end);
-    document.removeEventListener('mousemove', drag_mM);
-}
-
-window.addEventListener("resize", resize_event_subtitle);
-function resize_event_subtitle() {
-    let video_subtitle_container = document.getElementById("video_subtitle_container");
-    const maxBottom = video_subtitle_container.clientHeight;
-
-    subtitle_japanese.style.bottom = Math.min(Math.max(subtitle_japanese.style.bottom.replace("px", ""), -subtitle_japanese.clientHeight), maxBottom) + "px";
-    subtitle_japanese.style.left = 0;
-    subtitle_japanese.style.left = (subtitle_japanese.parentElement.offsetWidth - subtitle_japanese.offsetWidth) / 2 + "px";
-
-    subtitle_english.style.bottom = Math.min(Math.max(subtitle_english.style.bottom.replace("px", ""), -subtitle_english.clientHeight), maxBottom) + "px";
-    subtitle_english.style.left = 0;
-    subtitle_english.style.left = (subtitle_english.parentElement.offsetWidth - subtitle_english.offsetWidth) / 2 + "px";
-}
-// #endregion
-
-document.getElementById("btn_load").addEventListener("click", load_video);
-initialize();
-
-function initialize() {
-    document.getElementById("txt_url").value = localStorage.getItem("url");
-    if (localStorage.getItem("url") != null) {
-        load_video();
-    }
-}
-
-let transcript_table = document.getElementById("transcript_table");
-transcript_table.addEventListener("dblclick", function (event) {
-    let tr_element = event.target.parentElement;
-    if(tr_element.tagName != "TR") return;
-
-    tr_element.className = "tr_selected";
-    if(current_id != -1)
-        document.getElementById(current_id).className = "tr_unselected";
-    current_id = tr_element.id;
-
-    let time = tr_element.children[0].innerText;
-    let text = tr_element.children[1].innerHTML;
-    let string_split = ["", text];
-
-    // if <br> is in the text, split it
-    if(text.includes("<br>")) {
-        text = text.split("<br>");
-        if(text.length > 1) {
-            string_split[0] = text[0];
-            string_split[1] = text[1];
-        }
-    }
-
-    let english = string_split[0];
-    let japanese = string_split[1];
-
-    process_text(japanese, english);
-
-    var audio = new Audio('/audio/' + time.replace(/:/g, "") + '.wav');
-    audio.play();
+// Running session
+// fetch get "/session" to get session data
+fetch("/session").then(response => response.text()).then(data => {
+	if (data) {
+		document.getElementById("link").value = data;
+		document.getElementById("submit-link").click();
+	}
 });
 
-var player = null;
-function load_youtube(id) {
-    if(player != null) {
-        player.loadVideoById(id, 0);
-        return;
-    }
 
-    video_id = id;
-    var tag = document.createElement('script');
-    tag.src = "https://www.youtube.com/iframe_api";
-    var firstScriptTag = document.getElementsByTagName('script')[0];
-    firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-}
 
+/* Youtube IFrame API */
 function onYouTubeIframeAPIReady() {
-    player = new YT.Player('video', {
-        videoId: video_id,
-        events: {
-            //'onReady': function (e) {e.target.playVideo();}
-        }
-    });
+    YTPlayer = new YT.Player('player', {
+		height: "100%",
+		width: "100%",
+		playerVars: {
+			controls: 1,
+			fs: 0,
+			modestbranding: 1,
+			enablejsapi: 1,
+		}});
+
+	YTPlayer.addEventListener("onReady", function() {
+		document.getElementById("submit-link").click();
+	});
 }
 
-function load_video() {
-    let video_url = document.getElementById("txt_url").value;
-    localStorage.setItem("url", video_url);
-
-    load_youtube(video_url.split("v=")[1])
-
-    let form = new FormData();
-    form.append("text", video_url);
-    fetch("/transcribe", {
-        method: "POST",
-        body: form
-    });
-}
-
-var socket = io();
-socket.on('update', function(data) {
-    console.log("Got some data.");
+/* Server processing */
+SocketIO.on('update', function(data) {
     if (data.time != null) {
-        last_time = data.time;
-        data.english = data.translate;
-        data.japanese = data.transcribe;
-        if (data.english != "" || data.japanese != "") {
-            append_transcription(data);
-        }
+		document.getElementById("transcribe").innerHTML = "<span>" + data.translate + "</span>";
     }
+
+	resizeVideoComponents()
 });
 
-var transcription = [];
-var current_id = -1;
-function append_transcription(data) {
-    // data => {time: "00:00:00", english: "Hello", japanese: "こんにちは"}
-    transcription.push(data);
 
-    let transcript_table = document.getElementById("transcript_table");
-    let eng_html = `${data.english}<br>`
-    if (data.english == "") eng_html = "";
-    transcript_table.innerHTML = `<tr id=${transcription.length} class="tr_unselected"><td style="text-align:center">${data.time}</td><td>${eng_html}${data.japanese}</td></tr>` + transcript_table.innerHTML;
-    if(current_id == -1 || current_id == transcription.length - 1) {
-        if(current_id != -1)
-            document.getElementById(current_id).className = "tr_unselected";
-
-        current_id = transcription.length;
-        document.getElementById(current_id).className = "tr_selected";
-
-        process_text(data.japanese, data.english);
-    }
-}
-
-var text_cache = {};
-function process_text(japanese, english) {
-    if (japanese != null && japanese != "") {
-        subtitle_japanese.setAttribute("current", japanese);
-        subtitle_english.setAttribute("current", english);
-        if (text_cache[japanese] != null) {
-            load_text_to_subtitle(text_cache[japanese], english);
-        } else {
-            load_text_to_subtitle(japanese, english);
-
-            let form = new FormData();
-            form.append("text", japanese);
-
-            fetch("/process", {
-                method: "POST",
-                body: form
-            }).then(response => response.json()).then(data => {
-                if (data.error == null) {
-                    text_cache[japanese] = data;
-                    if (subtitle_japanese.getAttribute("current") == japanese) {
-                        load_text_to_subtitle(data, english);
-                    }
-                }
-            });
-        }
-    }
-}
-
-function load_text_to_subtitle(data, text="") {
-    let innerHTML = "";
-    // if data is a string
-    if (typeof data == "string") {
-        innerHTML =
-        `<div class="word_container">
-            <span class="word" index=${0}>${data}</span>
-        </div>`;
+/* Helper functions */
+function toggleColorScheme() {
+    if (document.body.classList.toggle("dark-mode")) {
+        document.getElementById("color-scheme").children[0].innerHTML =
+        `<path fill-rule="evenodd" clip-rule="evenodd" d="
+            M12 16C14.2091 16 16 14.2091 16 12C16 9.79086 14.2091 8 12 8C9.79086 8 8 9.79086
+            8 12C8 14.2091 9.79086 16 12 16ZM12 18C15.3137 18 18 15.3137 18 12C18 8.68629 15.3137
+            6 12 6C8.68629 6 6 8.68629 6 12C6 15.3137 8.68629 18 12 18Z"/>
+        <path fill-rule="evenodd" clip-rule="evenodd" d="M11 0H13V4.06189C12.6724 4.02104 12.3387
+            4 12 4C11.6613 4 11.3276 4.02104 11 4.06189V0ZM7.0943 5.68018L4.22173 2.80761L2.80752
+            4.22183L5.6801 7.09441C6.09071 6.56618 6.56608 6.0908 7.0943 5.68018ZM4.06189
+            11H0V13H4.06189C4.02104 12.6724 4 12.3387 4 12C4 11.6613 4.02104 11.3276 4.06189 11ZM5.6801
+            16.9056L2.80751 19.7782L4.22173 21.1924L7.0943 18.3198C6.56608 17.9092 6.09071 17.4338
+            5.6801 16.9056ZM11 19.9381V24H13V19.9381C12.6724 19.979 12.3387 20 12 20C11.6613 20 11.3276
+            19.979 11 19.9381ZM16.9056 18.3199L19.7781 21.1924L21.1923 19.7782L18.3198 16.9057C17.9092
+            17.4339 17.4338 17.9093 16.9056 18.3199ZM19.9381 13H24V11H19.9381C19.979 11.3276 20 11.6613
+            20 12C20 12.3387 19.979 12.6724 19.9381 13ZM18.3198 7.0943L21.1923 4.22183L19.7781
+            2.80762L16.9056 5.6801C17.4338 6.09071 17.9092 6.56608 18.3198 7.0943Z"/>`
+        document.getElementById("color-scheme").children[1].innerHTML = "Light Mode"
     } else {
-        for(var i = 0; i < data.length; i++) {
-            innerHTML +=
-            `<div class="word_container">
-                <span class="word" index=${i}>${data[i]['text']}</span>
-                <div class="info" state="reading_form">
-                    ${data[i]['reading']}
-                </div>
-            </div>`;
-        }
+        document.getElementById("color-scheme").children[0].innerHTML =
+        `<path fill-rule="evenodd" clip-rule="evenodd" d="
+            M12.2256 2.00253C9.59172 1.94346 6.93894 2.9189 4.92893 4.92891C1.02369 8.83415 1.02369
+            15.1658 4.92893 19.071C8.83418 22.9763 15.1658 22.9763 19.0711 19.071C21.0811 17.061
+            22.0565 14.4082 21.9975 11.7743C21.9796 10.9772 21.8669 10.1818 21.6595 9.40643C21.0933
+            9.9488 20.5078 10.4276 19.9163 10.8425C18.5649 11.7906 17.1826 12.4053 15.9301 12.6837C14.0241
+            13.1072 12.7156 12.7156 12 12C11.2844 11.2844 10.8928 9.97588 11.3163 8.0699C11.5947 6.81738 12.2094
+            5.43511 13.1575 4.08368C13.5724 3.49221 14.0512 2.90664 14.5935 2.34046C13.8182 2.13305 13.0228
+            2.02041 12.2256 2.00253ZM17.6569 17.6568C18.9081 16.4056 19.6582 14.8431 19.9072 13.2186C16.3611
+            15.2643 12.638 15.4664 10.5858 13.4142C8.53361 11.362 8.73568 7.63895 10.7814 4.09281C9.1569
+            4.34184 7.59434 5.09193 6.34315 6.34313C3.21895 9.46732 3.21895 14.5326 6.34315 17.6568C9.46734
+            20.781 14.5327 20.781 17.6569 17.6568Z"/>`
+        document.getElementById("color-scheme").children[1].innerHTML = "Dark Mode"
     }
-
-    subtitle_japanese.innerHTML = innerHTML;
-    if(text != "") {
-        subtitle_english.innerHTML =
-        `<div class="word_container">
-            <span class="word" index=${0}>${text}</span>
-        </div>`;
-    } else {
-        subtitle_english.innerHTML = "";
-    }
-
-    resize_event_subtitle()
-    subtitle_japanese.querySelectorAll(".info").forEach(function (element) {
-        element.parentElement.addEventListener("mousedown", set_dictionary);
-    });
+	localStorage.setItem("dark-mode", document.body.classList.contains("dark-mode"));
 }
-
-var last_word = null;
-var last_info = null;
-function set_reading_form(event) {
-    let word_array = text_cache[subtitle_japanese.getAttribute("current")];
-    if(word_array == null) return;
-
-    let index = parseInt(last_word.getAttribute("index"));
-    if (index < 0 || index >= word_array.length || word_array[index] == null) return;
-
-    let text = word_array[index]["reading"];
-    if(text == null || text == "")
-        text = "No reading form";
-
-    last_info.innerHTML = text;
-    document.removeEventListener("mouseup", set_reading_form);
-}
-
-function set_dictionary(event) {
-    if(event.button != 0) return;
-
-    let word_element = event.target.parentElement.children[0];
-    let info_element = event.target.parentElement.children[1];
-
-    let word_array = text_cache[subtitle_japanese.getAttribute("current")];
-    if(word_array == null) return;
-
-    let index = parseInt(word_element.getAttribute("index"));
-    if (index < 0 || index >= word_array.length || word_array[index] == null) return;
-
-    let text = word_array[index]["text"];
-    if (text == null || text == "")
-        text = "No dictionary form";
-    else
-        text = word_array[index]["definitions"].join('<br>');
-
-    info_element.innerHTML = text;
-
-    last_word = word_element;
-    last_info = info_element;
-    document.addEventListener("mouseup", set_reading_form);
-}
-
-
-
