@@ -20,16 +20,19 @@
 
 body {
 	background-color: var(--background-color);
+	height: 100vh;
+	overflow-x: hidden;
 	margin: 0;
 }
 
+/* Start header */
 header {
 	background-color: var(--background-color);
 	border-bottom: 1px solid var(--line-color);
 	height: 50px;
 	top: 0;
 	width: 100%;
-	z-index: 5;
+	z-index: 10;
 }
 
 .header-container {
@@ -42,7 +45,6 @@ header {
 }
 
 button {
-	align-items: center;
 	background-color: var(--button-color);
 	border: 1px solid var(--line-color);
 	border-radius: 7px;
@@ -52,10 +54,10 @@ button {
 	-o-border-radius: 7px;
 	cursor: pointer;
 	column-gap: 5px;
-	display: flex;
 	height: 40px;
-	justify-content: space-between;
 	width: auto;
+	display: flex;
+	align-items: center;
 }
 
 button span {
@@ -86,8 +88,9 @@ button.toggle.active {
 
 button svg {
 	fill: var(--icon-color);
-	height: 30px;
-	width: 30px;
+	height: 24px;
+	padding: 4px;
+	width: 24px;
 }
 
 button:hover svg,
@@ -106,11 +109,7 @@ button:active span {
 }
 
 @media (max-width: 768px) {
-	button {
-		width: 40px;
-	}
-
-	button span {
+	header button span {
 		display: none;
 	}
 }
@@ -126,10 +125,10 @@ button:active span {
 	-o-border-radius: 40px;
 	display: flex;
 	height: 40px;
-	width: 50%;
 	justify-content: space-between;
 	margin-left: 10px;
 	margin-right: 10px;
+	width: 50%;
 }
 
 .search-container input {
@@ -168,45 +167,53 @@ button:active span {
 	-ms-border-top-left-radius: 0px;
 	-o-border-top-left-radius: 0px;
 	padding-left: 3px;
-	padding-right: 10px;
+	padding-right: 8px;
 }
 
 .search-container button:hover {
 	background-color: var(--button-color-hover);
 }
 
+/* End Header Items */
 
-main {
-	display: grid;
-	grid-template-columns: 1fr 0.3fr;
-	grid-template-rows: 0.3fr 1fr;
-	grid-column-gap: 0px;
-	grid-row-gap: 0px;
+
+/* Settings */
+#settings-container {
+	background-color: var(--button-color);
+	border-radius: 10px;
+	border: 1px solid var(--line-color);
+	box-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
+	height: 80%;
 	position: absolute;
-	width: 100%;
+	right: 10px;
+	top: 46px;
+	transition: opacity 0.2s linear, visibility 0s;
+	-webkit-transition: opacity 0.2s linear, visibility 0s;
+	-moz-transition: opacity 0.2s linear, visibility 0s;
+	-ms-transition: opacity 0.2s linear, visibility 0s;
+	-o-transition: opacity 0.2s linear, visibility 0s;
+	visibility: visible;
+	width: 250px;
+	z-index: 2000;
 }
 
-main.setting-hidden {
-	grid-template-rows: 0 1fr;
+#settings-container.hidden {
+	opacity: 0%;
+	visibility: hidden;
 }
 
-.settings-container {
-	grid-area: 1 / 1 / span 1 / span 2;
-	background-color: blue;
-}
+/* End Settings */
 
-.settings-container.hidden {
-	display: none;
+/* Main Container */
+.main-container {
+	display: grid;
+	grid-template: 1fr / 1fr 0.3fr;
+	height: calc(100% - 51px);
 }
 
 .video-container {
-	display: grid;
-	flex-grow: 1;
-	grid-area: 2 / 1 / span 1 / span 1;
-	grid-column-gap: 0px;
-	grid-row-gap: 0px;
-	grid-template-columns: 1fr;
-	grid-template-rows: 1fr 100px;
+	align-self: center;
+	position: relative;
 }
 
 #player-container {
@@ -214,10 +221,10 @@ main.setting-hidden {
 	border-left: 1px solid var(--line-color);
 	border-right: 1px solid var(--line-color);
 	border-top: 1px solid var(--line-color);
-	grid-area: 1;
 	margin-left: 10px;
 	margin-right: 10px;
 	margin-top: 10px;
+	position: relative;
 }
 
 #player-container,
@@ -244,6 +251,12 @@ main.setting-hidden {
 	-o-border-radius: 0px;
 }
 
+#player {
+	position: absolute;
+	width: 100%;
+	height: 100%;
+}
+
 .controller-container {
 	background-color: var(--button-color);
 	border: 1px solid var(--line-color);
@@ -257,38 +270,75 @@ main.setting-hidden {
 	-moz-border-bottom-right-radius: 15px;
 	-ms-border-bottom-right-radius: 15px;
 	-o-border-bottom-right-radius: 15px;
-	grid-area: 2;
 	margin-bottom: 10px;
 	margin-left: 10px;
 	margin-right: 10px;
 	min-height: 100px;
 }
 
+.subtitle-settings {
+	align-items: center;
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	grid-template-rows: repeat(2, 1fr);
+	height: 100px;
+	justify-items: center;
+	padding: 10px;
+	width: auto;
+}
 
-#fullscreen {
-	background-color: rgba(0, 0, 0, 0.4);
-	border: 1px solid rgba(255, 255, 255, 0.1);
-	border-radius: 50%;
-	-webkit-border-radius: 50%;
-	-moz-border-radius: 50%;
-	-ms-border-radius: 50%;
-	-o-border-radius: 50%;
+.subtitle-options {
+	align-items: center;
+	display: grid;
+	grid-column: 1 / 5;
+	grid-row: 1 / 3;
+	grid-template-columns: repeat(4, 1fr);
+	grid-template-rows: repeat(2, 1fr);
+	justify-items: center;
+}
+
+.subtitle-options label {
+	grid-row: 1;
+}
+
+.subtitle-options input[type="number"],
+.subtitle-options select {
+	font-size: 14px;
+	grid-row: 2;
+	padding: 5px;
+}
+
+.color-selector {
+	grid-row: 2;
 	height: 30px;
-	opacity: 0.2;
-	position: absolute;
-	transition-duration: 500ms;
+	padding: 0;
 	width: 30px;
 }
 
-#main-player-container:hover #fullscreen {
+#fullscreen {
+	background-color: rgba(0, 0, 0, 0.4);
+	border-radius: 50%;
+	-moz-border-radius: 50%;
+	-ms-border-radius: 50%;
+	-o-border-radius: 50%;
+	-webkit-border-radius: 50%;
+	border: 1px solid rgba(255, 255, 255, 0.1);
+	bottom: calc(1% + 40px);
+	height: 30px;
+	opacity: 0.2;
+	position: absolute;
+	right: 10px;
+	width: 30px;
+	z-index: 1000;
+}
+
+#player-container:hover #fullscreen {
 	opacity: 1;
 }
 
 #fullscreen svg {
 	fill: rgb(255, 255, 255, 0.8);
-	height: 24px;
 	transition-duration: 200ms;
-	width: 24px;
 }
 
 #fullscreen:hover svg {
@@ -297,46 +347,28 @@ main.setting-hidden {
 
 .subtitle-wrapper {
 	background-color: rgb(0, 0, 0, 0.5);
-	padding-left: 5px;
-	padding-right: 5px;
-	position: absolute;
-	text-align: center;
-}
-
-.subtitle-wrapper span {
 	color: white;
 	font-family: Arial;
 	font-size: 20px;
 	font-weight: bold;
-	overflow: auto;
+	padding-left: 5px;
+	padding-right: 5px;
+	position: absolute;
+	text-align: center;
 	text-shadow: 2px 2px rgba(0, 0, 0, 0.685);
+	z-index: 1000;
 }
+
 
 .transcription-container {
 	background-color: red;
-	grid-area: 2 / 2 / span 1 / span 1;
 	height: 100%;
+	width: 100%;
 }
 
 @media (max-width: 768px) {
-	main {
-		grid-template-columns: 1fr;
-		grid-template-rows: 0.3fr 1fr 0.3fr;
-	}
-
-	main.setting-hidden {
-		grid-template-rows: 0 1fr 0.3fr;
-	}
-
-	.settings-container {
-		grid-area: 1 / 1 / span 1 / span 1;
-	}
-
-	.video-container {
-		grid-area: 2 / 1 / span 1 / span 1;
-	}
-
-	.transcription-container {
-		grid-area: 3 / 1 / span 1 / span 1;
+	.main-container {
+		grid-template: 1fr 0.3fr / 1fr;
+		height: auto;
 	}
 }

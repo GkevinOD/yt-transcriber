@@ -6,15 +6,6 @@ var SocketIO = io();
 function styleVideoComponents() {
 	styleSubtitles();
 	stylePlayerContainer();
-
-	// Reposition fullscreen button
-	const element = document.getElementById("fullscreen");
-	if (fullscreen) {
-		const container = element.parentElement;
-
-		element.style.top = container.offsetHeight + container.offsetTop - element.offsetHeight - 50 + "px";
-		element.style.right = (document.body.offsetWidth - container.offsetWidth + (container.offsetWidth * 0.005)) + "px";
-	}
 }
 
 function styleSubtitles() {
@@ -30,9 +21,25 @@ function styleSubtitles() {
 }
 
 function stylePlayerContainer() {
-	const element = document.getElementById("player-container");
-	element.style.minHeight = element.clientWidth * 0.5625 + "px";
+	if (!document.getElementById("player-container").classList.contains("fullscreen")) {
+		const element = document.getElementById("player-container");
+		element.style.minHeight = element.clientWidth * 0.5625 + "px";
+	}
 }
+
+/* Subtitle customizations */
+const fontSizeInput = document.querySelector("#font-size");
+const fontFamilyInput = document.querySelector("#font-family");
+
+// Set up event listeners to update the styles when the settings are changed
+fontSizeInput.addEventListener("input", () => {
+	document.querySelector('.subtitle-wrapper').style.fontSize = `${fontSizeInput.value}px`;
+});
+
+fontFamilyInput.addEventListener("input", () => {
+	document.querySelector('.subtitle-wrapper').style.fontFamily = fontFamilyInput.value;
+});
+
 
 var ROVideoComponents = new ResizeObserver(styleVideoComponents);
 ROVideoComponents.observe(document.getElementById("player-container"));
@@ -83,8 +90,7 @@ document.getElementById("submit-link").addEventListener("click", function() {
 	}
 });
 document.getElementById("settings").addEventListener("click", function() {
-	document.getElementById("main-settings").classList.toggle("hidden");
-	document.getElementsByTagName("main")[0].classList.toggle("setting-hidden");
+	document.getElementById("settings-container").classList.toggle("hidden");
 })
 
 
@@ -108,8 +114,6 @@ fetch("/session").then(response => response.text()).then(data => {
 	}
 });
 
-
-
 /* Youtube IFrame API */
 function onYouTubeIframeAPIReady() {
     YTPlayer = new YT.Player('player', {
@@ -129,8 +133,8 @@ function onYouTubeIframeAPIReady() {
 
 /* Server processing */
 SocketIO.on('update', function(data) {
-    if (data.time != null && data.transcribe != "") {
-		document.getElementById("transcribe").innerHTML = "<span>" + data.transcribe + "</span>";
+    if (data.time != null && data.translate != "") {
+		document.getElementById("transcribe").innerHTML = "<span>" + data.translate + "</span>";
     }
 });
 
@@ -153,7 +157,6 @@ function toggleColorScheme() {
             17.4339 17.4338 17.9093 16.9056 18.3199ZM19.9381 13H24V11H19.9381C19.979 11.3276 20 11.6613
             20 12C20 12.3387 19.979 12.6724 19.9381 13ZM18.3198 7.0943L21.1923 4.22183L19.7781
             2.80762L16.9056 5.6801C17.4338 6.09071 17.9092 6.56608 18.3198 7.0943Z"/>`
-        document.getElementById("color-scheme").children[1].innerHTML = "Light Mode"
     } else {
         document.getElementById("color-scheme").children[0].innerHTML =
         `<path fill-rule="evenodd" clip-rule="evenodd" d="
@@ -167,7 +170,6 @@ function toggleColorScheme() {
             15.2643 12.638 15.4664 10.5858 13.4142C8.53361 11.362 8.73568 7.63895 10.7814 4.09281C9.1569
             4.34184 7.59434 5.09193 6.34315 6.34313C3.21895 9.46732 3.21895 14.5326 6.34315 17.6568C9.46734
             20.781 14.5327 20.781 17.6569 17.6568Z"/>`
-        document.getElementById("color-scheme").children[1].innerHTML = "Dark Mode"
     }
 	localStorage.setItem("dark-mode", document.body.classList.contains("dark-mode"));
 }
