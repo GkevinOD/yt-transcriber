@@ -66,36 +66,32 @@
         </div>
     </header>
 
-	<main>
+	<main class="setting-hidden">
 		<div id="main-settings" class="settings-container hidden">
 
 		</div>
 
-		<div class="main-container">
-			<div class="video-container">
-				<div id="main-player-container" class="player-container">
-					<div id="transcribe" class="subtitle-wrapper">
-						<span id="subtitle-text">1This is a long text This is a long text This is a long text This is a long text This is a long text This is a long text This is a long text This is a long te2xt</span>
-					</div>
-					<button id="fullscreen">
-						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-							<path d="M3 3H9V5H5V9H3V3Z"/>
-							<path d="M3 21H9V19H5V15H3V21Z"/>
-							<path d="M15 21H21V15H19V19H15V21Z"/>
-							<path d="M21 3H15V5H19V9H21V3Z"/>
-						</svg>
-					</button>
-					<div id="player"></div>
-				</div>
-
-				<div class="controller-container">
-
-				</div>
+		<div class="video-container">
+			<div id="player-container">
+				<div id="transcribe" class="subtitle-wrapper"></div>
+				<button id="fullscreen">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+						<path d="M3 3H9V5H5V9H3V3Z"/>
+						<path d="M3 21H9V19H5V15H3V21Z"/>
+						<path d="M15 21H21V15H19V19H15V21Z"/>
+						<path d="M21 3H15V5H19V9H21V3Z"/>
+					</svg>
+				</button>
+				<div id="player"></div>
 			</div>
 
-			<div class="transcription-container">
+			<div class="controller-container">
 
 			</div>
+		</div>
+
+		<div class="transcription-container">
+
 		</div>
 	</main>
 </body>

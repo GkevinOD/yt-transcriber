@@ -3,16 +3,9 @@ var YTPlayer = null;
 var SocketIO = io();
 
 /* Styling */
-function resizeVideoComponents() {
-	// Resize and reposition subtitles
-	var subtitles = document.getElementsByClassName("subtitle-wrapper");
-	for (var i = 0; i < subtitles.length; i++) {
-		const element = subtitles[i];
-		const container = element.parentElement;
-		element.style.maxWidth = container.offsetWidth - container.offsetLeft + "px";
-		element.style.top = container.offsetHeight + container.offsetTop - element.offsetHeight + "px";
-		element.style.left = (container.offsetWidth - element.offsetWidth) / 2 + container.offsetLeft + "px";
-	}
+function styleVideoComponents() {
+	styleSubtitles();
+	stylePlayerContainer();
 
 	// Reposition fullscreen button
 	const element = document.getElementById("fullscreen");
@@ -24,8 +17,30 @@ function resizeVideoComponents() {
 	}
 }
 
-var ROVideoComponents = new ResizeObserver(resizeVideoComponents);
-ROVideoComponents.observe(document.getElementById("main-player-container"));
+function styleSubtitles() {
+	var subtitles = document.getElementsByClassName("subtitle-wrapper");
+	for (var i = 0; i < subtitles.length; i++) {
+		const element = subtitles[i];
+		const container = element.parentElement;
+		element.style.maxWidth = container.clientWidth - 10 + "px";
+		element.style.top = container.offsetHeight + container.offsetTop - element.offsetHeight - 20 + "px";
+		element.style.left = container.offsetLeft + (container.offsetWidth - element.offsetWidth) / 2 + "px";
+	}
+
+}
+
+function stylePlayerContainer() {
+	const element = document.getElementById("player-container");
+	element.style.minHeight = element.clientWidth * 0.5625 + "px";
+}
+
+var ROVideoComponents = new ResizeObserver(styleVideoComponents);
+ROVideoComponents.observe(document.getElementById("player-container"));
+
+// Using mutation observer to detect when the subtitle changes innerhtml and run the resize function
+var MO = new MutationObserver(styleSubtitles);
+MO.observe(document.getElementById("transcribe"), { attributes: true, childList: true, subtree: true });
+
 
 // Buttons with class toggle will stay pressed when clicked
 var toggles = document.querySelectorAll("button.toggle");
@@ -39,11 +54,14 @@ for (var i = 0; i < toggles.length; i++) {
 /* Event listeners */
 document.getElementById("color-scheme").addEventListener("click", toggleColorScheme);
 document.getElementById("fullscreen").addEventListener("click", function() {
-	document.getElementById("main-player-container").classList.toggle("fullscreen");
-	if (!document.fullscreenElement) {
-		document.getElementById("main-player-container").requestFullscreen();
+	const element = document.getElementById("player-container")
+
+	var fullscreenFunction = element.requestFullscreen || element.webkitRequestFullscreen || element.mozRequestFullScreen || element.msRequestFullscreen;
+	if (fullscreenFunction && element.classList.toggle("fullscreen")) {
+		fullscreenFunction.call(element);
 	} else {
-		document.exitFullscreen();
+		var exitFullscreenFunction = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+		exitFullscreenFunction.call(document);
 	}
 });
 document.getElementById("submit-link").addEventListener("click", function() {
@@ -57,7 +75,6 @@ document.getElementById("submit-link").addEventListener("click", function() {
 	if(YTPlayer) {
 		YTPlayer.loadVideoById(id);
 		SocketIO.emit("load", url);
-		//document.getElementById("main-player-container").requestFullscreen();
 	} else {
 		var tag = document.createElement('script');
 		tag.src = "https://www.youtube.com/iframe_api";
@@ -67,6 +84,7 @@ document.getElementById("submit-link").addEventListener("click", function() {
 });
 document.getElementById("settings").addEventListener("click", function() {
 	document.getElementById("main-settings").classList.toggle("hidden");
+	document.getElementsByTagName("main")[0].classList.toggle("setting-hidden");
 })
 
 
@@ -111,11 +129,9 @@ function onYouTubeIframeAPIReady() {
 
 /* Server processing */
 SocketIO.on('update', function(data) {
-    if (data.time != null) {
-		document.getElementById("transcribe").innerHTML = "<span>" + data.translate + "</span>";
+    if (data.time != null && data.transcribe != "") {
+		document.getElementById("transcribe").innerHTML = "<span>" + data.transcribe + "</span>";
     }
-
-	resizeVideoComponents()
 });
 
 
