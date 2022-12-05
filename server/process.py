@@ -29,12 +29,12 @@ def open_stream(stream, preferred_quality):
 	if option is None:
 		option = next(iter(stream_options.values()))
 
-	args = ['streamlink', stream, option, '-O', '--stream-segment-threads', '5', '--hls-live-edge', '1', '--hls-segment-stream-data']
+	args = ['streamlink', stream, option, '-O', '--hls-live-edge', '2', '--stream-segment-threads', '2', '--hls-segment-stream-data']
 	streamlink_process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 	try:
 		ffmpeg_process = (
-			ffmpeg.input('pipe:', loglevel='panic')
+			ffmpeg.input('pipe:', thread_queue_size=1024, loglevel='panic')
 			.output('pipe:', format='s16le', acodec='pcm_s16le', ac=1, ar=SAMPLE_RATE)
 			.run_async(pipe_stdin=True, pipe_stdout=True)
 		)
@@ -73,7 +73,7 @@ def process_audio(audio, model, task, q_dict, key, attempt=0):
 	for segment in result['segments']:
 		result_text += clean_text(segment['text'])
 
-	if result_text == '' and attempt < 3:
+	if result_text == '' and attempt < 5:
 		# remove 50 ms from the beginning of the audio which could help the model
 		print(f'Key: {key}, Task: {task}, Attempt {attempt + 1}: Transcription failed, retrying...')
 		return process_audio(audio[int(0.05 * SAMPLE_RATE):], model, task, q_dict, key, attempt + 1)
@@ -208,13 +208,15 @@ def process_stream(url, ffmpeg_process, models_whisper, model_silero):
 			q_dict[q_key] = result_dict
 
 			while len(tasks) > 0:
-				for i, thread in enumerate(threads):
-					if thread is None or not thread.is_alive():
-						#print(f'Starting {tasks[0]} on thread {i} for #{q_key}')
-						threads[i] = threading.Thread(target=process_audio, args=(audio, models_whisper[i], tasks.pop(0), q_dict, q_key))
-						threads[i].start()
-						break
-				time.sleep(0.1)
+				if len(threads) == 1:
+					process_audio(audio, models_whisper[0], tasks.pop(0), q_dict, q_key)
+				else:
+					for i, thread in enumerate(threads):
+						if thread is None or not thread.is_alive():
+							threads[i] = threading.Thread(target=process_audio, args=(audio, models_whisper[i], tasks.pop(0), q_dict, q_key))
+							threads[i].start()
+							break
+					time.sleep(0.1)
 			q_key += 1
 	except Exception as e:
 		# print line number and error
