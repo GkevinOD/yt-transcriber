@@ -19,7 +19,7 @@ def open_stream(stream, preferred_quality):
 	stream_options = streamlink.streams(stream)
 	if not stream_options:
 		print('No playable streams found on this URL:', stream)
-		return None, None
+		return None
 
 	option = None
 	for quality in [preferred_quality, 'audio_only', 'audio_mp4a', 'audio_opus', 'worst']:
@@ -27,19 +27,10 @@ def open_stream(stream, preferred_quality):
 			option = quality
 			break
 	if option is None:
-		# Fallback
 		option = next(iter(stream_options.values()))
 
-	def writer(streamlink_proc, ffmpeg_proc):
-		while (not streamlink_proc.poll()) and (not ffmpeg_proc.poll()):
-			try:
-				chunk = streamlink_proc.stdout.read(1024)
-				ffmpeg_proc.stdin.write(chunk)
-			except (BrokenPipeError, OSError):
-				pass
-
-	cmd = ['streamlink', stream, option, '-O']
-	streamlink_process = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+	args = ['streamlink', stream, option, '-O', '--stream-segment-threads', '5', '--hls-live-edge', '1', '--hls-segment-stream-data']
+	streamlink_process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 	try:
 		ffmpeg_process = (
@@ -50,9 +41,25 @@ def open_stream(stream, preferred_quality):
 	except ffmpeg.Error as e:
 		raise RuntimeError(f'Failed to load audio: {e.stderr.decode()}') from e
 
+	def writer(streamlink_process, ffmpeg_process):
+		CHUNK_SIZE = 1024*10
+		while streamlink_process.poll() is None and ffmpeg_process.poll() is None:
+			try:
+				chunk = streamlink_process.stdout.read(CHUNK_SIZE)
+				if chunk:
+					ffmpeg_process.stdin.write(chunk)
+			except:
+				pass
+
+		print('Stream ended, stopping processes...')
+		if streamlink_process.poll() is None:
+			streamlink_process.kill()
+		if ffmpeg_process.poll() is None:
+			ffmpeg_process.kill()
+
 	thread = threading.Thread(target=writer, args=(streamlink_process, ffmpeg_process))
 	thread.start()
-	return ffmpeg_process, streamlink_process
+	return ffmpeg_process
 
 def process_audio(audio, model, task, q_dict, key, attempt=0):
 	result_dict = q_dict[key]
@@ -117,7 +124,7 @@ def model_change(last_model, last_num_models):
 		return MODEL_CHANGE
 	return 0
 
-def process_stream(url, process1, process2, models_whisper, model_silero):
+def process_stream(url, ffmpeg_process, models_whisper, model_silero):
 	chunk_history = []
 
 	# For checking model changes that require reloading
@@ -148,10 +155,12 @@ def process_stream(url, process1, process2, models_whisper, model_silero):
 			silent_ms = 0
 			speech_ms = 0
 			max_speech = 0
-			while process1.poll() is None:
-				in_bytes = process1.stdout.read(CHUNK_SIZE * 2) # Factor of 2 comes from reading int16 as bytes
+			while ffmpeg_process.poll() is None:
+				if config.session != url: return 0
+
+				in_bytes = ffmpeg_process.stdout.read(CHUNK_SIZE * 2) # Factor of 2 comes from reading int16 as bytes
 				if not in_bytes:
-					print('Could not read audio data from stream, exiting...')
+					print('No data read from ffmpeg.')
 					return STREAM_PROCESS_END
 
 				chunk = np.frombuffer(in_bytes, np.int16).flatten().astype(np.float32) / 32768.0
@@ -183,8 +192,11 @@ def process_stream(url, process1, process2, models_whisper, model_silero):
 					else:
 						break
 			else:
-				print('Stream process has ended, exiting...')
+				print('ffmpeg process has ended.')
 				return STREAM_PROCESS_END
+
+			if audio is None: return STREAM_PROCESS_END
+			print(f'Audio length: {len(audio) / SAMPLE_RATE:.2f}s')
 
 			task_str = config.settings['whisper']['task']
 			tasks = ['transcribe', 'translate'] if task_str == 'both' else [task_str]
@@ -198,11 +210,11 @@ def process_stream(url, process1, process2, models_whisper, model_silero):
 			while len(tasks) > 0:
 				for i, thread in enumerate(threads):
 					if thread is None or not thread.is_alive():
-						print(f'Starting {tasks[0]} on thread {i} for #{q_key}')
+						#print(f'Starting {tasks[0]} on thread {i} for #{q_key}')
 						threads[i] = threading.Thread(target=process_audio, args=(audio, models_whisper[i], tasks.pop(0), q_dict, q_key))
 						threads[i].start()
 						break
-				time.sleep(0.5)
+				time.sleep(0.1)
 			q_key += 1
 	except Exception as e:
 		# print line number and error
@@ -216,9 +228,8 @@ def process_stream(url, process1, process2, models_whisper, model_silero):
 		thread_send.do_run = False
 		thread_send.join()
 
-		process1.kill()
-		if process2:
-			process2.kill()
+		ffmpeg_process.kill()
+
 	return 0
 
 def clean_text(text):
@@ -276,10 +287,11 @@ def main(_socketio, _config, VAD):
 		model_status = 0
 		if len(models_whisper) > 0 and config.session != '':
 			try:
-				process1, process2 = open_stream(config.session, config.settings['whisper']['preferred_quality'])
-				if process1 is None or process2 is None: continue
+				print(f'Loading session {config.session}...')
+				ffmpeg_process = open_stream(config.session, config.settings['whisper']['preferred_quality'])
+				if ffmpeg_process is None: continue
 
-				model_status = process_stream(config.session, process1, process2, models_whisper, model_silero)
+				model_status = process_stream(config.session, ffmpeg_process, models_whisper, model_silero)
 			except Exception as e:
 				print(f'Error processing stream: {e}')
 
@@ -288,9 +300,10 @@ def main(_socketio, _config, VAD):
 			while len(models_whisper) > 0:
 				unload_model(models_whisper.pop(0))
 		elif model_status == STREAM_PROCESS_END:
+			print('Process ended, session cleared.')
 			config.session = ""
 
 		time.sleep(1)
 
 if __name__ == '__main__':
-	main(None)
+	main(None, None, None)
