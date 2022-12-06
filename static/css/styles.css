@@ -44,6 +44,23 @@ header {
 	margin-right: 10px;
 }
 
+label {
+	color: var(--icon-color);
+	font-family: 'Trebuchet MS', sans-serif;
+	font-size: 16px;
+	font-weight: 700;
+}
+
+input, select {
+	background-color: var(--background-color);
+	border-radius: 5px;
+	border: 1px solid var(--line-color);
+	color: var(--icon-color);
+	font-size: 16px;
+	font-weight: 500;
+	outline: none;
+}
+
 button {
 	background-color: var(--button-color);
 	border: 1px solid var(--line-color);
@@ -225,6 +242,7 @@ button:active span {
 	margin-right: 10px;
 	margin-top: 10px;
 	position: relative;
+	aspect-ratio: 16 / 9;
 }
 
 #player-container,
@@ -255,6 +273,29 @@ button:active span {
 	position: absolute;
 	width: 100%;
 	height: 100%;
+}
+
+.subtitle-wrapper {
+	background-color: rgb(0, 0, 0, 0.5);
+	bottom: 15%;
+	color: white;
+	font-family: Arial;
+	font-size: 20px;
+	font-weight: bold;
+	position: absolute;
+	text-align: center;
+	text-shadow: 2px 2px rgba(0, 0, 0, 0.685);
+	visibility: collapse;
+	width: 100%;
+	z-index: 1000;
+}
+
+.subtitle-wrapper span {
+	background-color: inherit;
+	margin: 0 auto;
+	padding-left: 5px;
+	padding-right: 5px;
+	visibility: visible;
 }
 
 .controller-container {
@@ -343,20 +384,6 @@ button:active span {
 
 #fullscreen:hover svg {
 	fill: rgb(255, 255, 255, 1);
-}
-
-.subtitle-wrapper {
-	background-color: rgb(0, 0, 0, 0.5);
-	color: white;
-	font-family: Arial;
-	font-size: 20px;
-	font-weight: bold;
-	padding-left: 5px;
-	padding-right: 5px;
-	position: absolute;
-	text-align: center;
-	text-shadow: 2px 2px rgba(0, 0, 0, 0.685);
-	z-index: 1000;
 }
 
 
