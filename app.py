@@ -50,12 +50,17 @@ if __name__ == '__main__':
 
         # Start whisper and silero
         from server.process import main
-		from server.silero import VAD
-		p_thread = threading.Thread(target=main, args=(socketio, config, VAD))
+		p_thread = threading.Thread(target=main, args=(config, socketio.emit, False))
         p_thread.daemon = True
         p_thread.start()
 
-        socketio.run(app)
+		def clean_thread(p_thread):
+			print('Cleaning up process thread...')
+			p_thread.do_run = False
+			p_thread.join(timeout = 10)
+
+		atexit.register(clean_thread, p_thread)
+		socketio.run(app)
     finally:
         # Delete session
         if os.path.exists(config.dirs['session']):

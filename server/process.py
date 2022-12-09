@@ -1,25 +1,38 @@
-import sys, os, json, time, glob, gc
+import sys, os, time, glob, gc
 from torch.cuda import empty_cache
-from datetime import datetime
 
-import ffmpeg, streamlink, subprocess, threading
+import ffmpeg, streamlink, subprocess, threading, queue
 from scipy.io.wavfile import write as wavwrite
 
 import numpy as np
+import re
+SAMPLE_RATE = 16000
 
-import whisper
-from whisper.audio import SAMPLE_RATE
+def is_valid_url(url: str) -> bool:
+	regex = re.compile(
+		r'^(?:http|ftp)s?://' # http:// or https://
+		r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)|' #domain...
+		r'localhost|' #localhost...
+		r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})' # ...or ip
+		r'(?::\d+)?' # optional port
+		r'(?:/?|[/?]\S+)$', re.IGNORECASE)
 
-config = None
-socketio = None
+	return re.match(regex, url) is not None
 
-MODEL_CHANGE = 1
-STREAM_PROCESS_END = 2
 def open_stream(stream, preferred_quality):
-	stream_options = streamlink.streams(stream)
-	if not stream_options:
-		print('No playable streams found on this URL:', stream)
-		return None
+	stream = stream.strip()
+	if not is_valid_url(stream):
+		print('Invalid URL: ', stream)
+		return None, None, None
+
+	try:
+		stream_options = streamlink.streams(stream)
+		if not stream_options:
+			print('No playable streams found on this URL:', stream)
+			return None, None, None
+	except Exception as e:
+		print(f'Error getting stream options: {e}')
+		return None, None, None
 
 	option = None
 	for quality in [preferred_quality, 'audio_only', 'audio_mp4a', 'audio_opus', 'worst']:
@@ -29,7 +42,7 @@ def open_stream(stream, preferred_quality):
 	if option is None:
 		option = next(iter(stream_options.values()))
 
-	args = ['streamlink', stream, option, '-O', '--hls-live-edge', '2', '--stream-segment-threads', '2', '--hls-segment-stream-data']
+	args = ['streamlink', stream, option, '-O']
 	streamlink_process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 	try:
@@ -39,202 +52,260 @@ def open_stream(stream, preferred_quality):
 			.run_async(pipe_stdin=True, pipe_stdout=True)
 		)
 	except ffmpeg.Error as e:
-		raise RuntimeError(f'Failed to load audio: {e.stderr.decode()}') from e
+		print(f'Failed to load audio: {e}')
+		terminate_processes(streamlink_process, ffmpeg_process)
+		return None, None, None
+
 
 	def writer(streamlink_process, ffmpeg_process):
-		CHUNK_SIZE = 1024*10
-		while streamlink_process.poll() is None and ffmpeg_process.poll() is None:
-			try:
-				chunk = streamlink_process.stdout.read(CHUNK_SIZE)
-				if chunk:
-					ffmpeg_process.stdin.write(chunk)
-			except:
-				pass
+		try:
+			while streamlink_process.poll() is None and ffmpeg_process.poll() is None:
+				if getattr(writer_thread, "do_run", True) is False: break
+				chunk = streamlink_process.stdout.read(1024)
+				if chunk: ffmpeg_process.stdin.write(chunk)
+		except Exception as e:
+			print(f'Error writing from streamlink to ffmpeg: {e}')
+		finally:
+			terminate_processes(streamlink_process, ffmpeg_process)
 
-		print('Stream ended, stopping processes...')
-		if streamlink_process.poll() is None:
-			streamlink_process.kill()
-		if ffmpeg_process.poll() is None:
-			ffmpeg_process.kill()
+	writer_thread = threading.Thread(target=writer, args=(streamlink_process, ffmpeg_process))
+	writer_thread.start()
+	return ffmpeg_process, streamlink_process, writer_thread
 
-	thread = threading.Thread(target=writer, args=(streamlink_process, ffmpeg_process))
-	thread.start()
-	return ffmpeg_process
+def terminate_processes(*processes):
+	for process in processes:
+		if process is not None and process.poll() is None:
+			process.kill()
 
-def process_audio(audio, model, task, q_dict, key, attempt=0):
-	result_dict = q_dict[key]
-	temperature = [float(x) for x in config.settings['whisper']['temperature'].split(',')]
-	result = model.transcribe(audio,
-							  language=config.settings['whisper']['language'],
-							  task=task,
-							  temperature=temperature,
-							  without_timestamps=True)
-	result_text = ''
-	for segment in result['segments']:
-		result_text += clean_text(segment['text'])
-
-	if result_text == '' and attempt < 5:
-		# remove 50 ms from the beginning of the audio which could help the model
-		print(f'Key: {key}, Task: {task}, Attempt {attempt + 1}: Transcription failed, retrying...')
-		return process_audio(audio[int(0.05 * SAMPLE_RATE):], model, task, q_dict, key, attempt + 1)
-
-	result_dict[task] = result_text
-	if all(value is not None for value in result_dict.values()):
-		result_dict['time_end'] = time.time()
-
-
-def send(dict, audio = None, max_files = 200):
-	if dict.get('transcribe') is None and dict.get('translate') is None: return
-	if dict.get('transcribe') == '' and dict.get('translate') == '': return
-
-	if dict.get('time') is None:
-		dict['time'] = datetime.now().strftime('%H:%M:%S')
-
-	if audio is not None:
-		wavwrite(config.dirs['audio'] + dict['time'].replace(':', '') + '.wav', SAMPLE_RATE, audio)
-
-		# limit number of files in audio directory
-		files = glob.glob(config.dirs['audio'] + '*.wav')
-		if len(files) > max_files:
-			oldest = min(files, key=os.path.getctime)
-			os.remove(oldest)
-
-	socketio.emit('update', dict)
-
-def send_result(q_dict):
-	while getattr(threading.currentThread(), "do_run", True):
-		if len(q_dict) == 0: continue
-		q_front_key, q_front_value = next(iter(q_dict.items()))
-
-		is_complete = all(value is not None for value in q_front_value.values())
-		if is_complete:
-			time_elapse = q_front_value.pop('time_end') - q_front_value.pop('time_start')
-			audio = q_front_value.pop('audio')
-
-			print(f'Key: {q_front_key}, Audio length: {len(audio) / SAMPLE_RATE:.2f}s, Process time: {time_elapse:.2f}s')
-			send(q_front_value, audio)
-
-			q_dict.pop(q_front_key)
-		time.sleep(0.5)
-
-def model_change(last_model, last_num_models):
-	if last_model != config.settings['whisper']['model']:
-		return MODEL_CHANGE
-	if last_num_models != config.settings['whisper']['num_models']:
-		return MODEL_CHANGE
-	return 0
-
-def process_stream(url, ffmpeg_process, models_whisper, model_silero):
-	chunk_history = []
-
-	# For checking model changes that require reloading
-	last_model = config.settings['whisper']['model']
-	last_num_models = config.settings['whisper']['num_models']
-
-	# Create thread for every whisper model
-	threads = [None for _ in range(len(models_whisper))]
-	q_dict = {} # Saves results
-	q_key = 0
-
-	# Thread to send results
-	thread_send = threading.Thread(target=send_result, args=(q_dict, ))
-	thread_send.start()
-	try:
-		model_silero.model.reset_states()
-		while config.session == url:
-			check_model = model_change(last_model, last_num_models)
-			if check_model != 0:
-				return check_model
-
-			CHUNK_SIZE = int((config.settings.getint('process', 'chunk_size_ms') / 1000) * SAMPLE_RATE)
-			PREPEND_SIZE = int((config.settings.getint('process', 'prepend_ms') / 1000) * SAMPLE_RATE)
-
-			MAX_AUDIO_LENGTH = config.settings.getint('whisper', 'interval') * SAMPLE_RATE
-
-			audio = None # Stores audio data up to interval length
-			silent_ms = 0
-			speech_ms = 0
-			max_speech = 0
-			while ffmpeg_process.poll() is None:
-				if config.session != url: return 0
-
-				in_bytes = ffmpeg_process.stdout.read(CHUNK_SIZE * 2) # Factor of 2 comes from reading int16 as bytes
-				if not in_bytes:
-					print('No data read from ffmpeg.')
-					return STREAM_PROCESS_END
-
-				chunk = np.frombuffer(in_bytes, np.int16).flatten().astype(np.float32) / 32768.0
-				chunk_history.append(chunk)
-				if len(chunk_history) > (config.settings.getint('process', 'max_silent_ms') / config.settings.getint('process', 'chunk_size_ms')):
-					chunk_history.pop(0)
-
-				# Process audio with vad
-				threshold_high = config.settings.getfloat('silero', 'threshold_high')
-				threshold_low = config.settings.getfloat('silero', 'threshold_low')
-				if model_silero is not None and model_silero.is_silent(chunk, threshold=threshold_high if audio is None else threshold_low):
-					speech_ms = 0
-					silent_ms += config.settings.getint('process', 'chunk_size_ms') if audio is not None else 0
-					if audio is None: continue
-				else:
-					silent_ms = 0
-					speech_ms += config.settings.getint('process', 'chunk_size_ms')
-					max_speech = max(max_speech, speech_ms)
-
-				# Append chunk to buffer
-				if audio is None and (PREPEND_SIZE != 0):
-					audio = np.concatenate(chunk_history[-(PREPEND_SIZE // CHUNK_SIZE):])
-				else:
-					audio = np.concatenate([audio, chunk]) if audio is not None else chunk
-
-				if len(audio) >= MAX_AUDIO_LENGTH or silent_ms >= config.settings.getint('process', 'max_silent_ms'):
-					if max_speech < config.settings.getint('process', 'min_speech_ms'):
-						audio = None
-					else:
-						break
+def read_ffmpeg(ffmpeg_process, q_audio: queue.Queue, params):
+	thread = threading.currentThread()
+	start_size = 0 # First data is start of the timestamp
+	total_size = 0
+	while ffmpeg_process is not None and ffmpeg_process.poll() is None:
+		if getattr(thread, "do_run", True) is False: break
+		try:
+			chunk = ffmpeg_process.stdout.read(params.chunk_size * 2)
+			if chunk:
+				audio = np.frombuffer(chunk, np.int16).flatten().astype(np.float32) / 32768.0
+				if start_size == 0: start_size = len(audio)
+				total_size += len(audio)
+				timestamp = (total_size - start_size) / SAMPLE_RATE
+				q_audio.put((audio, timestamp))
 			else:
-				print('ffmpeg process has ended.')
-				return STREAM_PROCESS_END
+				raise(Exception('No audio data received from ffmpeg.'))
+		except Exception as e:
+			print(f'Error reading ffmpeg: {e}')
+			break
 
-			if audio is None: return STREAM_PROCESS_END
-			print(f'Audio length: {len(audio) / SAMPLE_RATE:.2f}s')
+def set_speech_prob(q_audio: queue.Queue, q_processed: queue.Queue, params):
+	sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+	thread = threading.currentThread()
 
-			task_str = config.settings['whisper']['task']
-			tasks = ['transcribe', 'translate'] if task_str == 'both' else [task_str]
+	if params.verbose: print('Loading silero model...')
+	import silero
+	path = params.silero_jit_path
 
-			result_dict = {'audio': audio, 'time_start': time.time(), 'time': datetime.now().strftime('%H:%M:%S')}
-			for task in tasks:
-				result_dict[task] = None
+	# If vad is disabled, all prob will be 1.0
+	silero_model = silero.VAD(path, params.vad_enabled)
+	while getattr(thread, "do_run", True):
+		if q_audio.empty():
+			time.sleep(0.05)
+			continue
 
-			q_dict[q_key] = result_dict
+		raw_audio, timestamp = q_audio.get()
+		audio_prob_list = silero_model.speech_prob(raw_audio)
+		last_length = 0
+		# Fixed size in silero.py set to 512. Roughly 32ms for each chunk.
+		while len(audio_prob_list) > 0:
+			audio, prob = audio_prob_list.pop(0)
+			timestamp += last_length
+			last_length = len(audio) / SAMPLE_RATE
+			q_processed.put((audio, prob, timestamp))
 
-			while len(tasks) > 0:
-				if len(threads) == 1:
-					process_audio(audio, models_whisper[0], tasks.pop(0), q_dict, q_key)
+def filter_speech(q_processed: queue.Queue, q_filtered: queue.Queue, params):
+	thread = threading.currentThread()
+
+	audio = None
+	silent = 0
+	speech = 0
+	prepend_audio = []
+	prepend_audio_size = 0
+	start_timestamp = None
+	while getattr(thread, "do_run", True):
+		if q_processed.empty():
+			time.sleep(0.05)
+			continue
+
+		chunk, prob, timestamp = q_processed.get()
+		chunk_size = len(chunk)
+
+		prepend_audio.append(chunk)
+		prepend_audio_size += chunk_size
+		while prepend_audio_size > params.prepend_size:
+			prepend_audio_size -= len(prepend_audio.pop(0))
+
+		if prob < (params.threshold_low if audio is None else params.threshold_high):
+			silent += chunk_size if audio is not None else 0
+			if audio is None:
+				continue
+		else:
+			silent = 0
+			speech += chunk_size
+
+		if start_timestamp is None:
+			start_timestamp = timestamp
+
+		# Append chunk to buffer
+		if audio is None and params.prepend_size > 0:
+			audio = np.concatenate(prepend_audio)
+			prepend_audio_size = sum([len(a) for a in prepend_audio[:-1]])
+			start_timestamp -= prepend_audio_size / SAMPLE_RATE
+		else:
+			audio = np.concatenate([audio, chunk]) if audio is not None else chunk
+
+		if len(audio) >= params.max_length + params.prepend_size or silent >= params.max_silent:
+			speech_prob = speech / len(audio)
+			if speech_prob >= params.min_speech:
+				append_audio_size = 0
+				while append_audio_size < params.append_size:
+					chunk, prob, timestamp = q_processed.get()
+					chunk_size = len(chunk)
+
+					prepend_audio.append(chunk)
+					prepend_audio_size += chunk_size
+					while prepend_audio_size > params.prepend_size:
+						prepend_audio_size -= len(prepend_audio.pop(0))
+
+					audio = np.concatenate([audio, chunk])
+					append_audio_size += chunk_size
+				q_filtered.put((audio, start_timestamp, speech_prob))
+
+			audio = None
+			silent = 0
+			speech = 0
+			start_timestamp = None
+
+def process_audio(q_filtered: queue.Queue, socketio_emit: callable, params):
+	sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+	thread = threading.currentThread()
+
+	if params.verbose: print('Loading whisper model...')
+	import whisper
+	whisper_model = whisper.load_model(params.model)
+
+	results_history = {}
+	previous_result = None # Used for prefix
+	while getattr(thread, "do_run", True):
+		if q_filtered.empty():
+			time.sleep(0.05)
+			continue
+
+		if params.max_buffer > 0 and q_filtered.qsize() > params.max_buffer:
+			# Empty queue
+			if params.verbose: print('Buffer is full, emptying queue to catch up...')
+			with q_filtered.mutex:
+				q_filtered.queue.clear()
+			continue
+
+		audio, timestamp, speech_prob = q_filtered.get()
+
+		# Parse parameters
+		temperature = [float(x) for x in params.temperature.split(',')]
+		tasks = [params.task]
+		if params.task == 'both':
+			tasks = ['transcribe', 'translate']
+		language = params.language
+		if language == 'auto' or language == '':
+			language = None
+
+		# Time in this format: 00.00.00,000
+		time_formatted = time.strftime('%H:%M:%S', time.gmtime(timestamp)) + ',' + str(int(timestamp * 1000) % 1000).zfill(3)
+		results = {'time': time_formatted, 'timestamp': round(timestamp, 4), 'length': len(audio) / SAMPLE_RATE, 'prob': round(speech_prob, 4), 'process': time.time(), 'buffer': 0}
+
+		# Check for prefix for time overlaps of 80% the prepend_ms value
+		prefix_result = None
+		if previous_result is not None:
+			time_diff = timestamp - previous_result['timestamp']
+			if (previous_result['length']) - time_diff > (0.8 * params.prepend_ms / 1000):
+				prefix_result = previous_result
+
+		for task in tasks:
+			prompt = results_history.get(task, None)
+			if prompt is not None:
+				prompt = ' '.join(prompt[-params.prompt_history:])
+				prompt.strip()
+
+			attempts = 3
+			while attempts > 0:
+				result = whisper_model.transcribe(audio,
+												  prompt=prompt,
+												  language=language,
+												  task=task,
+												  temperature=temperature,
+												  beam_size=params.beam_size,
+												  best_of=params.best_of,
+												  suppress_tokens="-1",
+												  without_timestamps=True)
+				result_text = ''
+				for segment in result['segments']:
+					result_text += clean_text(segment['text']) + ' '
+
+				result_text = result_text.replace('  ', ' ')
+				result_text = result_text.strip()
+
+				# Check for prefix due to time overlap
+				if prefix_result is not None and prefix_result.get(task, '') != '':
+					first = prefix_result.get(task).lower()
+					second = result_text.lower()
+
+					if first == second:
+						result_text = ''
+						break
+					else:
+						# Remove intersection at end and beginning of string, with 1 character degree of freedom
+						for i in range(2):
+							a = first[:len(first) - i]
+							b = second[i:]
+							found = False
+							for j in range(0, len(a)):
+								if b.startswith(a[-j:]):
+									found = True
+									if params.verbose: print(f'Found intersect: {result_text} -> {(result_text[i:])[j:]}')
+									if len(result_text) - len((result_text[i:])[j:]) > 2: # If changes are too short then it is probably wrong.
+										result_text = (result_text[i:])[j:]
+							if found: break
+
+					# Remove if all that is left is punctuation
+					result_text = result_text.replace('  ', ' ')
+					result_text = result_text.strip()
+					if len(result_text) <= 2: # Remove string that are too short because they are probably wrong.
+						result_text = ''
+						break
+
+				if result_text == '':
+					attempts -= 1
+					audio = audio[int(SAMPLE_RATE * 0.05):]
 				else:
-					for i, thread in enumerate(threads):
-						if thread is None or not thread.is_alive():
-							threads[i] = threading.Thread(target=process_audio, args=(audio, models_whisper[i], tasks.pop(0), q_dict, q_key))
-							threads[i].start()
-							break
-					time.sleep(0.1)
-			q_key += 1
-	except Exception as e:
-		# print line number and error
-		print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
-	finally:
-		for thread in threads:
-			if thread is not None:
-				thread.join()
-			del thread
+					break
 
-		thread_send.do_run = False
-		thread_send.join()
+			results[task] = result_text
+			if params.prompt_history > 0:
+				if results_history.get(task) is not None:
+					results_history[task].append(result_text)
+				else:
+					results_history[task] = [result_text]
 
-		ffmpeg_process.kill()
+				if len(results_history[task]) > params.prompt_history:
+					results_history[task].pop(0)
+		results['process'] = round(time.time() - results['process'], 4)
+		results['buffer'] = q_filtered.qsize()
 
-	return 0
+		if results.get('translate', '') != '' or results.get('transcribe', '') != '':
+			previous_result = results
+			if params.verbose: print(results)
+			socketio_emit('update', results)
 
-def clean_text(text):
+def clean_text(text: str):
 	if text is None:
 		return ''
 
@@ -251,61 +322,146 @@ def clean_text(text):
 
 	return text
 
-def unload_model(model):
-	print('Unloading model...')
-	del model
-	gc.collect()
-	empty_cache()
+def clean_threads(*threads):
+	for thread in threads:
+		if thread is not None and thread.is_alive():
+			thread.do_run = False
+			thread.join()
 
-def load_whisper_models(model_size='medium', num_models=1):
-	models = []
-	for i in range(num_models):
+def main(config, socketio_emit: callable, verbose: bool = False):
+	last_session = ''
+	last_settings_modified = config.settings_modified
+	ffmpeg_process = streamlink_process = writer_thread = None
+	thread_read_ffmpeg = thread_set_speech_prob = thread_filter_speech = thread_process_audio = None
+	while getattr(threading.currentThread(), "do_run", True):
+		if (config.session != last_session and config.session != '') and (ffmpeg_process is None or ffmpeg_process.poll() is not None):
+			last_session = config.session
+			if verbose: print(f'Starting session: {config.session}')
+			ffmpeg_process, streamlink_process, writer_thread = open_stream(config.session, config.settings['whisper']['preferred_quality'])
+			if ffmpeg_process == None or ffmpeg_process.poll() is not None:
+				print('Failed to open stream')
+				config.session = ''
+				continue
+		else:
+			time.sleep(1)
+			continue
+
+		if verbose: print('Starting to process stream...')
 		try:
-			print(f'Loading whisper model {i + 1} of {num_models}...')
-			model = whisper.load_model(model_size)
-			models.append(model)
+			q_audio = queue.Queue()
+			q_processed = queue.Queue()
+			q_filtered = queue.Queue()
+			class Params:
+				def __init__(self):
+					self.append_ms = config.settings.getint('process', 'append_ms', fallback=250)
+					self.beam_size = config.settings.getint('whisper', 'beam_size', fallback=1)
+					self.best_of = config.settings.getint('whisper', 'best_of', fallback=1)
+					self.chunk_size_ms = config.settings.getint('process', 'chunk_size_ms', fallback=250)
+					self.interval = config.settings.getint('whisper', 'interval', fallback=7)
+					self.language = config.settings.get('whisper', 'language', fallback='auto')
+					self.max_buffer = config.settings.getint('whisper', 'max_buffer', fallback=5)
+					self.max_silent_ms = config.settings.getint('process', 'max_silent_ms', fallback=750)
+					self.min_speech = config.settings.getfloat('process', 'min_speech', fallback=0.5)
+					self.model = config.settings.get('whisper', 'model', fallback='medium')
+					self.preferred_quality = config.settings.get('whisper', 'preferred_quality', fallback='worst')
+					self.prepend_ms = config.settings.getint('process', 'prepend_ms', fallback=500)
+					self.prompt_history = config.settings.getint('whisper', 'prompt_history', fallback=3)
+					self.task = config.settings.get('whisper', 'task', fallback='transcribe')
+					self.temperature = config.settings.get('whisper', 'temperature', fallback='0')
+					self.threshold = config.settings.getfloat('silero', 'threshold_low', fallback=0.5)
+					self.threshold_high = config.settings.getfloat('silero', 'threshold_high', fallback=0.8)
+					self.vad_enabled = config.settings.getboolean('process', 'use_vad', fallback=True)
+
+					self.append_size = int(self.append_ms / 1000 * SAMPLE_RATE)
+					self.chunk_size = int(self.chunk_size_ms / 1000 * SAMPLE_RATE)
+					self.max_length = self.interval * SAMPLE_RATE
+					self.max_silent = int(self.max_silent_ms / 1000 * SAMPLE_RATE)
+					self.prepend_size = int(self.prepend_ms / 1000 * SAMPLE_RATE)
+					self.silero_jit_path = os.path.dirname(os.path.abspath(__file__)) + '/models/silero_vad.jit'
+					self.threshold_low = self.threshold
+					self.verbose = verbose
+			params = Params()
+			if verbose: print(params.__dict__)
+			thread_read_ffmpeg = threading.Thread(target=read_ffmpeg, args=(ffmpeg_process, q_audio, params))
+			thread_set_speech_prob = threading.Thread(target=set_speech_prob, args=(q_audio, q_processed, params))
+			thread_filter_speech = threading.Thread(target=filter_speech, args=(q_processed, q_filtered, params))
+			thread_process_audio = threading.Thread(target=process_audio, args=(q_filtered, socketio_emit, params))
+
+			thread_read_ffmpeg.start()
+			thread_set_speech_prob.start()
+			thread_filter_speech.start()
+			thread_process_audio.start()
+
+			# Loop for changes in settings
+			while getattr(threading.currentThread(), "do_run", True):
+				restart_session = False
+				restart_model = False
+				if last_settings_modified != config.settings_modified:
+					if verbose: print('Change detected in settings.')
+					temp_model = params.model # Require model restart
+					temp_preferred_quality = params.preferred_quality # Require session restart
+					temp_use_vad = params.vad_enabled # Require session restart
+
+					params.__init__()
+
+					if temp_model != params.model: restart_model = True
+					if temp_preferred_quality != params.preferred_quality: restart_session = True
+					if temp_use_vad != params.vad_enabled: restart_session = True
+
+					last_settings_modified = config.settings_modified
+
+				if config.session != last_session or (restart_session or restart_model):
+					if verbose: print(f'Changing session to: {config.session}...')
+					q_audio.queue.clear()
+					q_processed.queue.clear()
+					q_filtered.queue.clear()
+
+					terminate_processes(ffmpeg_process, streamlink_process)
+					if writer_thread is not None and writer_thread.is_alive():
+						writer_thread.join()
+
+					clean_threads(thread_read_ffmpeg, thread_set_speech_prob, thread_filter_speech)
+
+					ffmpeg_process, streamlink_process, writer_thread = open_stream(config.session, config.settings['whisper']['preferred_quality'])
+					if verbose: print('Starting to process stream...')
+					thread_read_ffmpeg = threading.Thread(target=read_ffmpeg, args=(ffmpeg_process, q_audio, params), daemon=True)
+					thread_set_speech_prob = threading.Thread(target=set_speech_prob, args=(q_audio, q_processed, params), daemon=True)
+					thread_filter_speech = threading.Thread(target=filter_speech, args=(q_processed, q_filtered, params), daemon=True)
+
+					thread_read_ffmpeg.start()
+					thread_set_speech_prob.start()
+					thread_filter_speech.start()
+
+					last_session = config.session
+
+				if restart_model:
+					if verbose: print(f'Restarting whisper model: {params.model}...')
+					thread_process_audio.do_run = False
+					thread_process_audio.join()
+
+					gc.collect()
+					empty_cache()
+
+					thread_process_audio = threading.Thread(target=process_audio, args=(q_filtered, socketio_emit, params), daemon=True)
+					thread_process_audio.start()
+
+				# Break if any thread is dead
+				if not thread_read_ffmpeg.is_alive() or not thread_set_speech_prob.is_alive() or not thread_filter_speech.is_alive() or not thread_process_audio.is_alive():
+					if verbose: print('One of the threads has terminated. Clearing session...')
+					config.session = ''
+					break
+				time.sleep(1)
 		except Exception as e:
-			print(f'Error loading model {i + 1}: {e}')
-			unload_model(model)
+			print('Error on line {}'.format(sys.exc_info()[-1].tb_lineno), type(e).__name__, e)
+		finally:
+			if verbose: print('Closing all threads and subprocesses...')
+			terminate_processes(ffmpeg_process, streamlink_process)
+			clean_threads(thread_read_ffmpeg, thread_set_speech_prob, thread_filter_speech, thread_process_audio, writer_thread)
+			if verbose: print(f'Finished processing stream.')
 
-	return models
-
-def main(_socketio, _config, VAD):
-	global socketio, config
-	socketio = _socketio
-	config = _config
-
-	print('Loading silero model...')
-	model_silero = VAD(config.paths['silero']) if config.settings.getboolean('whisper', 'use_vad') else None
-	models_whisper = None
-
-	while True:
-		model_size = config.settings['whisper']['model']
-		model_count = config.settings.getint('whisper', 'num_models')
-
-		if models_whisper is None or len(models_whisper) == 0:
-			models_whisper = load_whisper_models(model_size=model_size, num_models=model_count)
-
-		model_status = 0
-		if len(models_whisper) > 0 and config.session != '':
-			try:
-				print(f'Loading session {config.session}...')
-				ffmpeg_process = open_stream(config.session, config.settings['whisper']['preferred_quality'])
-				if ffmpeg_process is None: continue
-
-				model_status = process_stream(config.session, ffmpeg_process, models_whisper, model_silero)
-			except Exception as e:
-				print(f'Error processing stream: {e}')
-
-		if model_status == MODEL_CHANGE:
-			print('Model changed detected, resetting...')
-			while len(models_whisper) > 0:
-				unload_model(models_whisper.pop(0))
-		elif model_status == STREAM_PROCESS_END:
-			print('Process ended, session cleared.')
-			config.session = ""
-
-		time.sleep(1)
+	print('Cleaning up processes and threads...')
+	terminate_processes(ffmpeg_process, streamlink_process)
+	clean_threads(thread_read_ffmpeg, thread_set_speech_prob, thread_filter_speech, thread_process_audio, writer_thread)
 
 if __name__ == '__main__':
-	main(None, None, None)
+	main(None, None, False)
