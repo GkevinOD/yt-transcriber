@@ -125,7 +125,7 @@ document.getElementById("submit-link").addEventListener("click", function () {
     }
 });
 document.getElementById("settings").addEventListener("click", function () {
-    document.getElementById("settings-container").classList.toggle("hidden");
+    document.getElementById("main-settings").classList.toggle("hidden");
 });
 
 /* Initialize */

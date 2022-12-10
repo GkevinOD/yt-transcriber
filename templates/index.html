@@ -91,7 +91,120 @@
         </div>
     </header>
 
-    <div id="settings-container" class="hidden"></div>
+    <div id="main-settings" class="settings-container hidden">
+		<div class="settings-inner-container">
+			<div class="settings-section">
+				<span class="settings-section-title">App</span>
+				<div class="settings-item">
+					<label for="settings-key">API Key</label>
+					<input text="settings-key" placeholder="Key for applying changes..."/>
+				</div>
+			</div>
+
+			<div class="settings-section">
+				<span class="settings-section-title">Whisper</span>
+				<div class="settings-item">
+					<label for="settings-language">Language</label>
+					<select id="settings-language" class="select-setting" type="text" entries="Auto|English|Japanese" default="English"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-model">Model Size (model restarts)</label>
+					<select id="settings-model" class="select-setting" type="text" entries="tiny|tiny.en|base|base.en|small|small.en|medium|medium.en|large-v1|large-v2" default="medium"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-task">Task</label>
+					<select id="settings-task" class="select-setting" type="text" entries="Transcribe|Translate|Both" default="Transcribe"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-interval">Interval (seconds)</label>
+					<select id="settings-interval" class="select-setting" type="number" tofixed="1" min="1" max="15" step="0.1" default="5.0"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-buffer">Max Buffer</label>
+					<select id="settings-buffer" class="select-setting" type="number" tofixed="0" min="0" max="15" step="1" default="5"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-prompt-history">Prompt Buffer</label>
+					<select id="settings-prompt-history" class="select-setting" type="number" tofixed="0" min="0" max="15" step="1" default="5"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-temperature">Max Temperature</label>
+					<select id="settings-temperature" class="select-setting" type="number" tofixed="1" min="0" max="1" step="0.1" default="0.0"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-temperature-fallback">Temperature Fallback</label>
+					<select id="settings-temperature-fallback" class="select-setting" type="number" tofixed="3" min="0" max="0.5" step="0.025" default="0.200"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-beam-size">Beam Size</label>
+					<select id="settings-beam-size" class="select-setting" type="number" tofixed="0" min="0" max="20" step="1" default="3"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-best-of">Best Of</label>
+					<select id="settings-best-of" class="select-setting" type="number" tofixed="0" min="0" max="20" step="1" default="3"></select>
+				</div>
+			</div>
+
+			<div class="settings-section">
+				<span class="settings-section-title">Silero VAD</span>
+				<div class="settings-item">
+					<label for="settings-use-vad">Use Vad</label>
+					<select id="settings-use-vad" class="select-setting" type="text" entries="Enabled|Disabled" default="Enabled"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-threshold-low">Threshold Low</label>
+					<select id="settings-threshold-low" class="select-setting" type="number" tofixed="2" min="0" max="1" step="0.01" default="0.30"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-threshold-high">Threshold High</label>
+					<select id="settings-threshold-high" class="select-setting" type="number" tofixed="2" min="0" max="1" step="0.01" default="0.50"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-sample-size">Chunk Size (milliseconds)</label>
+					<select id="settings-sample-size" class="select-setting" type="number" tofixed="0" min="256" max="2048" step="32" default="512"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-sample-size">Sample Size (milliseconds)</label>
+					<select id="settings-sample-size" class="select-setting" type="number" tofixed="0" min="32" max="96" step="32" default="32"></select>
+				</div>
+			</div>
+
+			<div class="settings-section">
+				<span class="settings-section-title">Processing</span>
+				<div class="settings-item">
+					<label for="settings-prepend">Prepend Audio (milliseconds)</label>
+					<select id="settings-prepend" class="select-setting" type="number" tofixed="0" min="0" max="2048" step="32" default="512"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-append">Append Audio (milliseconds)</label>
+					<select id="settings-append" class="select-setting" type="number" tofixed="0" min="0" max="2048" step="32" default="512"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-min-speech">Min Speech</label>
+					<select id="settings-min-speech" class="select-setting" type="number" tofixed="2" min="0" max="1" step="0.01" default="0.30"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-max-silent">Max Silent (milliseconds)</label>
+					<select id="settings-max-silent" class="select-setting" type="number" tofixed="0" min="0" max="5000" step="10" default="130"></select>
+				</div>
+			</div>
+		</div>
+		<script>
+			document.querySelectorAll('select.select-setting[type="text"]').forEach(element =>
+				element.getAttribute('entries').split('|').forEach(entry => {
+					element.innerHTML += `<option value="${entry}" ${entry == element.getAttribute('default') ? 'selected' : ''}>${entry}</option>`;
+			}));
+
+			document.querySelectorAll('select.select-setting[type="number"]').forEach(element => {
+					for(let i = parseFloat(element.getAttribute('min')); i <= parseFloat(element.getAttribute('max')); i += parseFloat(parseFloat(element.getAttribute('step')).toFixed(3)))
+						element.innerHTML += `<option value="${i.toFixed(parseInt(element.getAttribute('tofixed')))}" ${i.toFixed(parseInt(element.getAttribute('tofixed'))) == element.getAttribute('default') ? 'selected' : ''}>${i.toFixed(parseInt(element.getAttribute('tofixed')))}</option>`;
+			});
+		</script>
+
+		<button id="settings-apply">
+			<span>Apply Settings</span>
+		</button>
+	</div>
 
     <div class="main-container">
         <div class="video-container">
