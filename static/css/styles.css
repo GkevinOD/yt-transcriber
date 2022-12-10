@@ -1,21 +1,34 @@
 :root {
 	--background-color: rgb(245, 245, 245);
 	--button-box-shadow-active: inset 0 0 5px rgba(0, 0, 0, 0.1);
-	--button-color: rgb(255, 255, 255);
-	--button-color-hover: rgb(235, 235, 235);
+	--button-color: rgb(250, 250, 250);
+	--button-color-hover: rgb(245, 245, 245);
 	--icon-color: rgb(45, 45, 45);
 	--icon-color-hover: rgb(0, 0, 0);
 	--line-color: rgba(220, 220, 220);
+	--container-background-color: rgb(253, 253, 253);
+	--table-row-color: rgb(240, 240, 240);
+	--table-row-color-even: rgb(245, 245, 245);
+	--table-row-color-hover: rgb(235, 235, 235);
+	--table-row-color-selected: rgb(215, 215, 215);
+	--table-row-color-selected-hover: rgb(195, 195, 195);
+	font-family: 'Trebuchet MS', sans-serif;
 }
 
 .dark-mode {
-	--background-color: rgb(15, 15, 15);
+	--background-color: rgb(30, 30, 30);
 	--button-box-shadow-active: inset 0 0 5px rgba(255, 255, 255, 0.1);
-	--button-color: rgb(40, 40, 40);
-	--button-color-hover: rgb(60, 60, 60);
-	--icon-color: rgb(215, 215, 215);
+	--button-color: rgb(35, 35, 35);
+	--button-color-hover: rgb(40, 40, 40);
+	--icon-color: rgb(240, 240, 240);
 	--icon-color-hover: rgb(255, 255, 255);
-	--line-color: rgba(35, 35, 35);
+	--line-color: rgba(36, 36, 36);
+	--container-background-color: rgb(25, 25, 25);
+	--table-row-color: rgb(35, 35, 35);
+	--table-row-color-even: rgb(30, 30, 30);
+	--table-row-color-hover: rgb(65, 65, 65);
+	--table-row-color-selected: rgb(85, 85, 85);
+	--table-row-color-selected-hover: rgb(105, 105, 105);
 }
 
 body {
@@ -28,7 +41,6 @@ body {
 /* Start header */
 header {
 	background-color: var(--background-color);
-	border-bottom: 1px solid var(--line-color);
 	height: 50px;
 	top: 0;
 	width: 100%;
@@ -46,7 +58,6 @@ header {
 
 label {
 	color: var(--icon-color);
-	font-family: 'Trebuchet MS', sans-serif;
 	font-size: 16px;
 	font-weight: 700;
 }
@@ -79,7 +90,6 @@ button {
 
 button span {
 	color: var(--icon-color);
-	font-family: 'Trebuchet MS', sans-serif;
 	font-size: 16px;
 	font-weight: 700;
 	padding-right: 3px;
@@ -133,7 +143,7 @@ button:active span {
 
 .search-container {
 	align-items: center;
-	background-color: var(--button-color);
+	background-color: var(--container-background-color);
 	border: 1px solid var(--line-color);
 	border-radius: 40px;
 	-webkit-border-radius: 40px;
@@ -152,7 +162,6 @@ button:active span {
 	background-color: transparent;
 	border: 0px solid var(--line-color);
 	color: var(--icon-color);
-	font-family: 'Trebuchet MS', sans-serif;
 	font-size: 16px;
 	font-weight: 500;
 	height: 36px;
@@ -196,9 +205,8 @@ button:active span {
 
 /* Settings */
 #settings-container {
-	background-color: var(--button-color);
+	background-color: var(--container-background-color);
 	border-radius: 10px;
-	border: 1px solid var(--line-color);
 	box-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
 	height: 80%;
 	position: absolute;
@@ -224,7 +232,7 @@ button:active span {
 /* Main Container */
 .main-container {
 	display: grid;
-	grid-template: 1fr / 1fr 0.3fr;
+	grid-template: 1fr / 1fr 0.4fr;
 	height: calc(100% - 51px);
 }
 
@@ -234,10 +242,7 @@ button:active span {
 }
 
 #player-container {
-	background-color: var(--button-color);
-	border-left: 1px solid var(--line-color);
-	border-right: 1px solid var(--line-color);
-	border-top: 1px solid var(--line-color);
+	background-color: var(--container-background-color);
 	margin-left: 10px;
 	margin-right: 10px;
 	margin-top: 10px;
@@ -261,7 +266,6 @@ button:active span {
 
 #player-container.fullscreen,
 #player-container.fullscreen iframe {
-	border: 0px;
 	border-radius: 0px;
 	-webkit-border-radius: 0px;
 	-moz-border-radius: 0px;
@@ -299,8 +303,7 @@ button:active span {
 }
 
 .controller-container {
-	background-color: var(--button-color);
-	border: 1px solid var(--line-color);
+	background-color: var(--container-background-color);
 	border-bottom-left-radius: 15px;
 	-webkit-border-bottom-left-radius: 15px;
 	-moz-border-bottom-left-radius: 15px;
@@ -387,15 +390,78 @@ button:active span {
 }
 
 
-.transcription-container {
-	background-color: red;
+.transcript-container {
 	height: 100%;
+	position: relative;
 	width: 100%;
+}
+
+.table-container {
+	background-color: var(--background-color);
+	height: 100%;
+	overflow-y: auto;
+	overflow-x: hidden;
+	position: absolute;
+	width:100%;
+}
+
+.transcript-table {
+	border: 0px;
+	border-spacing: 0px;
+	width: 100%;
+}
+
+.transcript-table tr {
+	background-color: var(--table-row-color);
+	position: relative;
+}
+
+.transcript-table tr:nth-child(even) {
+	background-color: var(--table-row-color-even);
+}
+
+.transcript-table th {
+	color: var(--icon-color);
+	left: 5px;
+	top: 5px;
+	font-size: 10px;
+	position: absolute;
+	left: 50%;
+	transform: translateX(-50%);
+	-webkit-transform: translateX(-50%);
+	-moz-transform: translateX(-50%);
+	-ms-transform: translateX(-50%);
+	-o-transform: translateX(-50%);
+}
+
+.transcript-table td  {
+	color: var(--icon-color);
+	padding-top: 10px;
+	text-align:center;
+	height: 50px;
+}
+
+.transcript-table td span {
+	overflow-y: auto;
+	display: block;
+	height: 40px;
+}
+
+.transcript-table tr:hover {
+	background-color: var(--table-row-color-hover);
+}
+
+.transcript-table td {
+	font-size: 14px;
+	font-weight: 700;
 }
 
 @media (max-width: 768px) {
 	.main-container {
-		grid-template: 1fr 0.3fr / 1fr;
-		height: auto;
+		grid-template: 1fr 1fr / 1fr;
+	}
+
+	.transcript-container {
+		min-height: 500px;
 	}
 }

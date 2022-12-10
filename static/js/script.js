@@ -105,17 +105,13 @@ document.getElementById("fullscreen").addEventListener("click", function () {
     }
 });
 document.getElementById("submit-link").addEventListener("click", function () {
-    // Formats: https://youtu.be/VIDEO_ID, https://www.youtube.com/watch?v=VIDEO_ID, https://www.youtube.com/embed/VIDEO_ID
     var url = document.getElementById("link").value;
-    var videoId = url.split("v=")[1];
-    if (videoId) {
-        var ampersandPosition = videoId.indexOf("&");
-        if (ampersandPosition != -1) {
-            videoId = videoId.substring(0, ampersandPosition);
-        }
-    } else {
-        videoId = url.split("/").pop();
-    }
+	videoId = getYoutubeVideoId(url.trim());
+	if (videoId == null) {
+		alert("Invalid URL");
+		return;
+	}
+
     url = "https://www.youtube.com/watch?v=" + videoId;
 
     if (YTPlayer) {
@@ -176,10 +172,13 @@ function onYouTubeIframeAPIReady() {
 }
 
 /* Server processing */
+
+/* Receive json data from the server */
 SocketIO.on("update", function (data) {
-    if (data.time != null && data.translate != "") {
+	let text = data.transcribe || data.translate;
+    if (data.time != null && text) {
         document.getElementById("transcribe").innerHTML =
-            "<span>" + data.translate + "</span>";
+            "<span>" + text + "</span>";
     }
 });
 
@@ -222,3 +221,16 @@ function toggleColorScheme() {
         document.body.classList.contains("dark-mode")
     );
 }
+
+function getYoutubeVideoId(url) {
+	// Parse the URL and extract the video ID
+	var regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+	var match = url.match(regExp);
+
+	// If the URL is a valid YouTube URL, return the video ID; otherwise, return null
+	if (match && match[2].length === 11) {
+	  return match[2];
+	} else {
+	  return null;
+	}
+  }
