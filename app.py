@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit
 from pyngrok import ngrok
 from flask.json import jsonify
-import os, json, time, subprocess, psutil, threading
+import os, threading, atexit
 
 import server.ichi_moe as process_text
 import server.config as config
