@@ -4,11 +4,15 @@ import warnings
 warnings.filterwarnings("ignore")
 
 class VAD:
-	def __init__(self, path, enabled):
+	def __init__(self, path, enabled, sample_size=512):
+		self.sample_size = sample_size
 		self.model = init_jit_model(path)
 		self.enabled = enabled
 
-	def speech_prob(self, audio, sampling_rate: int = 16000, window_size_samples: int = 512):
+	def speech_prob(self, audio, sampling_rate: int = 16000, window_size_samples = None):
+		if window_size_samples is None:
+			window_size_samples = self.sample_size if self.sample_size != 0 else 512
+
 		# Returns highest probability of speech in audio
 		# If the threshold is reached, the search is stopped and the highest probability is returned
 		if not isinstance(audio, torch.Tensor):

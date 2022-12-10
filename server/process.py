@@ -103,10 +103,9 @@ def set_speech_prob(q_audio: queue.Queue, q_processed: queue.Queue, params):
 
 	if params.verbose: print('Loading silero model...')
 	import silero
-	path = params.silero_jit_path
 
 	# If vad is disabled, all prob will be 1.0
-	silero_model = silero.VAD(path, params.vad_enabled)
+	silero_model = silero.VAD(params.silero_jit_path, params.vad_enabled, params.sample_size)
 	while getattr(thread, "do_run", True):
 		if q_audio.empty():
 			time.sleep(0.05)
@@ -366,6 +365,7 @@ def main(config, socketio_emit: callable, verbose: bool = False):
 					self.preferred_quality = config.settings.get('whisper', 'preferred_quality', fallback='worst')
 					self.prepend_ms = config.settings.getint('process', 'prepend_ms', fallback=500)
 					self.prompt_history = config.settings.getint('whisper', 'prompt_history', fallback=3)
+					self.sample_size_ms = config.settings.getint('silero', 'sample_size_ms', fallback=32)
 					self.task = config.settings.get('whisper', 'task', fallback='transcribe')
 					self.temperature = config.settings.get('whisper', 'temperature', fallback='0')
 					self.threshold = config.settings.getfloat('silero', 'threshold_low', fallback=0.5)
@@ -377,6 +377,7 @@ def main(config, socketio_emit: callable, verbose: bool = False):
 					self.max_length = self.interval * SAMPLE_RATE
 					self.max_silent = int(self.max_silent_ms / 1000 * SAMPLE_RATE)
 					self.prepend_size = int(self.prepend_ms / 1000 * SAMPLE_RATE)
+					self.sample_size = int(self.sample_size_ms / 1000 * SAMPLE_RATE)
 					self.silero_jit_path = os.path.dirname(os.path.abspath(__file__)) + '/models/silero_vad.jit'
 					self.threshold_low = self.threshold
 					self.verbose = verbose

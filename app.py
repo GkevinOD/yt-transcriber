@@ -50,7 +50,7 @@ if __name__ == '__main__':
 
         # Start whisper and silero
         from server.process import main
-		p_thread = threading.Thread(target=main, args=(config, socketio.emit, False))
+		p_thread = threading.Thread(target=main, args=(config, socketio.emit, True))
         p_thread.daemon = True
         p_thread.start()
 
