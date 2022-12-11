@@ -124,12 +124,16 @@
 					<select id="settings-buffer" class="select-setting" type="number" tofixed="0" min="0" max="15" step="1" default="5"></select>
 				</div>
 				<div class="settings-item">
-					<label for="settings-prompt-history">Prompt Buffer</label>
-					<select id="settings-prompt-history" class="select-setting" type="number" tofixed="0" min="0" max="15" step="1" default="5"></select>
+					<label for="settings-prompt-history">Prompt Buffer (seconds)</label>
+					<select id="settings-prompt-history" class="select-setting" type="number" tofixed="0" min="0" max="120" step="1" default="30"></select>
+				</div>
+				<div class="settings-item">
+					<label for="settings-prompt-max-gap">Prompt Max Gap (seconds)</label>
+					<select id="settings-prompt-max-gap" class="select-setting" type="number" tofixed="0" min="1" max="30" step="1" default="5"></select>
 				</div>
 				<div class="settings-item">
 					<label for="settings-temperature">Max Temperature</label>
-					<select id="settings-temperature" class="select-setting" type="number" tofixed="1" min="0" max="1" step="0.1" default="0.0"></select>
+					<select id="settings-temperature" class="select-setting" type="number" tofixed="2" min="0" max="1" step="0.01" default="0.00"></select>
 				</div>
 				<div class="settings-item">
 					<label for="settings-temperature-fallback">Temperature Fallback</label>
@@ -148,23 +152,23 @@
 			<div class="settings-section">
 				<span class="settings-section-title">Silero VAD</span>
 				<div class="settings-item">
-					<label for="settings-use-vad">Use Vad</label>
+					<label for="settings-use-vad">Use Vad (session restarts)</label>
 					<select id="settings-use-vad" class="select-setting" type="text" entries="Enabled|Disabled" default="Enabled"></select>
 				</div>
 				<div class="settings-item">
 					<label for="settings-threshold-low">Threshold Low</label>
-					<select id="settings-threshold-low" class="select-setting" type="number" tofixed="2" min="0" max="1" step="0.01" default="0.30"></select>
+					<select id="settings-threshold-low" class="select-setting" type="number" tofixed="2" min="0" max="1" step="0.01" default="0.10"></select>
 				</div>
 				<div class="settings-item">
 					<label for="settings-threshold-high">Threshold High</label>
-					<select id="settings-threshold-high" class="select-setting" type="number" tofixed="2" min="0" max="1" step="0.01" default="0.50"></select>
+					<select id="settings-threshold-high" class="select-setting" type="number" tofixed="2" min="0" max="1" step="0.01" default="0.40"></select>
 				</div>
 				<div class="settings-item">
-					<label for="settings-sample-size">Chunk Size (milliseconds)</label>
-					<select id="settings-sample-size" class="select-setting" type="number" tofixed="0" min="256" max="2048" step="32" default="512"></select>
+					<label for="settings-sample-size">Chunk Size (ms)</label>
+					<select id="settings-sample-size" class="select-setting" type="number" tofixed="0" min="256" max="2048" step="32" default="256"></select>
 				</div>
 				<div class="settings-item">
-					<label for="settings-sample-size">Sample Size (milliseconds)</label>
+					<label for="settings-sample-size">Sample Size (ms) (session restarts)</label>
 					<select id="settings-sample-size" class="select-setting" type="number" tofixed="0" min="32" max="96" step="32" default="32"></select>
 				</div>
 			</div>
@@ -172,20 +176,20 @@
 			<div class="settings-section">
 				<span class="settings-section-title">Processing</span>
 				<div class="settings-item">
-					<label for="settings-prepend">Prepend Audio (milliseconds)</label>
+					<label for="settings-prepend">Prepend Audio (ms)</label>
 					<select id="settings-prepend" class="select-setting" type="number" tofixed="0" min="0" max="2048" step="32" default="512"></select>
 				</div>
 				<div class="settings-item">
-					<label for="settings-append">Append Audio (milliseconds)</label>
+					<label for="settings-append">Append Audio (ms)</label>
 					<select id="settings-append" class="select-setting" type="number" tofixed="0" min="0" max="2048" step="32" default="512"></select>
 				</div>
 				<div class="settings-item">
-					<label for="settings-min-speech">Min Speech</label>
+					<label for="settings-min-speech">Speech Ratio</label>
 					<select id="settings-min-speech" class="select-setting" type="number" tofixed="2" min="0" max="1" step="0.01" default="0.30"></select>
 				</div>
 				<div class="settings-item">
-					<label for="settings-max-silent">Max Silent (milliseconds)</label>
-					<select id="settings-max-silent" class="select-setting" type="number" tofixed="0" min="0" max="5000" step="10" default="130"></select>
+					<label for="settings-max-silent">Max Silent (ms)</label>
+					<select id="settings-max-silent" class="select-setting" type="number" tofixed="0" min="0" max="5024" step="32" default="96"></select>
 				</div>
 			</div>
 		</div>
@@ -196,8 +200,10 @@
 			}));
 
 			document.querySelectorAll('select.select-setting[type="number"]').forEach(element => {
-					for(let i = parseFloat(element.getAttribute('min')); i <= parseFloat(element.getAttribute('max')); i += parseFloat(parseFloat(element.getAttribute('step')).toFixed(3)))
-						element.innerHTML += `<option value="${i.toFixed(parseInt(element.getAttribute('tofixed')))}" ${i.toFixed(parseInt(element.getAttribute('tofixed'))) == element.getAttribute('default') ? 'selected' : ''}>${i.toFixed(parseInt(element.getAttribute('tofixed')))}</option>`;
+					for(let i = parseFloat(element.getAttribute('min')); i <= parseFloat(element.getAttribute('max')); i += parseFloat(element.getAttribute('step'))) {
+						i_str = i.toFixed(parseInt(element.getAttribute('tofixed')));
+						element.innerHTML += `<option value="${i_str}"${i_str == element.getAttribute('default') ? 'selected' : ''}>${i_str}</option>`;
+					}
 			});
 		</script>
 
@@ -225,13 +231,7 @@
                 <div class="subtitle-settings">
                     <div class="subtitle-options">
                         <label for="font-size">Font Size:</label>
-                        <input
-                            type="number"
-                            id="font-size"
-                            min="10"
-                            max="36"
-                            value="20"
-                        />
+                        <input type="number" id="font-size" min="10" max="36" value="20"/>
                         <label for="font-color">Font Color:</label>
                         <button
                             id="font-color"
@@ -242,20 +242,14 @@
                         <select id="font-family">
                             <option value="Arial">Arial</option>
                             <option value="Verdana">Verdana</option>
-                            <option value="Times New Roman">
-                                Times New Roman
-                            </option>
+                            <option value="Times New Roman">Times New Roman </option>
                             <option value="Courier New">Courier New</option>
                             <option value="Georgia">Georgia</option>
                             <option value="Trebuchet MS">Trebuchet MS</option>
                             <option value="Tahoma">Tahoma</option>
                             <option value="Impact">Impact</option>
-                            <option value="Lucida Console">
-                                Lucida Console
-                            </option>
-                            <option value="Lucida Sans Unicode">
-                                Lucida Sans Unicode
-                            </option>
+                            <option value="Lucida Console">Lucida Console </option>
+                            <option value="Lucida Sans Unicode">Lucida Sans Unicode</option>
                         </select>
                         <label for="background-color">Background Color:</label>
                         <button
