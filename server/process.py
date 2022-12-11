@@ -202,8 +202,8 @@ def process_audio(q_filtered: queue.Queue, socketio_emit: callable, params):
 
 	# Used for whisper model prompt context
 	prompt_buffer = {
-		'transcribe': {'text': [], 'seconds': []},
-		'translate': {'text': [], 'seconds': []},
+		'transcribe': {'text': [], 'timestamps': []},
+		'translate': {'text': [], 'timestamps': []},
 	}
 
 	# Used for fixing prefix overlap
@@ -223,8 +223,8 @@ def process_audio(q_filtered: queue.Queue, socketio_emit: callable, params):
 				q_filtered.queue.clear()
 
 			prompt_buffer = {
-				'transcribe': {'text': [], 'seconds': []},
-				'translate': {'text': [], 'seconds': []},
+				'transcribe': {'text': [], 'timestamps': []},
+				'translate': {'text': [], 'timestamps': []},
 			}
 			continue
 
@@ -263,7 +263,7 @@ def process_audio(q_filtered: queue.Queue, socketio_emit: callable, params):
 		for task in tasks:
 			# Clear the prompt buffer if the time gap is too large
 			if params.prompt_history > 0 and time_gap >= params.prompt_max_gap:
-				prompt_buffer[task] = {'text': [], 'seconds': []}
+				prompt_buffer[task] = {'text': [], 'timestamps': []}
 
 			attempts = 3
 			while attempts > 0:
@@ -296,10 +296,10 @@ def process_audio(q_filtered: queue.Queue, socketio_emit: callable, params):
 
 			# Update the prompt buffer
 			prompt_buffer[task]['text'].append(result_text)
-			prompt_buffer[task]['seconds'].append(len(audio) / SAMPLE_RATE)
-			while sum(prompt_buffer[task]['seconds']) > params.prompt_history:
+			prompt_buffer[task]['timestamps'].append(timestamp)
+			while len(prompt_buffer[task]['timestamps']) > 0 and timestamp - prompt_buffer[task]['timestamps'][0] > params.prompt_history:
 				prompt_buffer[task]['text'].pop(0)
-				prompt_buffer[task]['seconds'].pop(0)
+				prompt_buffer[task]['timestamps'].pop(0)
 
 		results['whisper'] = round(time.time() - results['whisper'], 4)
 		results['buffer'] = q_filtered.qsize()
