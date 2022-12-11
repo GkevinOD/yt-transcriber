@@ -258,16 +258,7 @@ def process_audio(q_filtered: queue.Queue, socketio_emit: callable, params):
 		}
 
 		# Calculate the time gap between the current and previous results
-		time_gap = 0
-		if previous_result is not None:
-			time_gap = timestamp - previous_result['timestamp'] - previous_result['length']
-
-
-		# Attempt to fix overlap when there is time overlap caused by prepend
-		should_fix_prefix = False
-		if previous_result is not None:
-			if time_gap < -(0.8 * params.prepend_ms / 1000):
-				should_fix_prefix = True
+		time_gap = timestamp - previous_result['timestamp'] - previous_result['length'] if previous_result is not None else 0
 
 		for task in tasks:
 			# Clear the prompt buffer if the time gap is too large
@@ -292,38 +283,6 @@ def process_audio(q_filtered: queue.Queue, socketio_emit: callable, params):
 				result_text = ' '.join(clean_text(segment['text']) for segment in result['segments'])
 				result_text = result_text.replace('  ', ' ')
 				result_text = result_text.strip()
-
-				# Fix prefix overlap
-				if should_fix_prefix:
-					first = previous_result[task].lower()
-					second = result_text.lower()
-
-					if first == second:
-						result_text = ''
-						break
-					else:
-						# Removes from b if ending and starting of strings overlap
-						for i in range(2):
-							a = first[:len(first) - i]
-							b = second[i:]
-							found = False
-							for j in range(0, len(a)):
-								if b.startswith(a[-j:]):
-									found = True
-									if params.verbose: print(f'Found intersect: {result_text} -> {(result_text[i:])[j:]}')
-									# If changes are too short then it is probably wrong
-									if len(result_text) - len((result_text[i:])[j:]) > 2:
-										result_text = (result_text[i:])[j:]
-							if found: break
-
-					# Remove punctuation at the start of string
-					result_text = re.sub(r'^[\.|\,|\?|\!|。|、|？|！]\s', '', result_text)
-					result_text = result_text.strip()
-
-					# Remove string that are too short because they are probably wrong
-					if len(result_text) <= 2:
-						result_text = ''
-						break
 
 				# Remove the first 0.05 seconds of audio to try to get possible input
 				if not result_text or result_text.isspace():
